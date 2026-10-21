@@ -54,6 +54,7 @@ const el = {
   dlText: document.getElementById('dlText'),
   transcript: document.getElementById('transcript'),
   toggle: document.getElementById('toggle'),
+  theme: document.getElementById('theme'),
   state: document.getElementById('state'),
   stats: document.getElementById('stats'),
   diag: document.getElementById('diag'),
@@ -186,6 +187,28 @@ const EMPTY_STATE = `
 
 function showEmptyState() {
   el.transcript.innerHTML = EMPTY_STATE
+}
+
+// ------------------------------------------------------------------ 主题
+
+const THEME_KEY = 'localvoice.theme'
+
+/** 应用主题：设置 color-scheme 让 light-dark() 选色，同时给样式切换图标。 */
+function applyTheme(theme) {
+  document.documentElement.style.colorScheme = theme
+  document.documentElement.dataset.theme = theme
+}
+
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY)
+  const system = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  applyTheme(saved ?? system)
+
+  el.theme.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'
+    localStorage.setItem(THEME_KEY, next)
+    applyTheme(next)
+  })
 }
 
 /** 顶栏波形：把最近的电平画成滚动竖条，让"在收音"这件事一眼可见。 */
@@ -794,6 +817,7 @@ async function startDownload() {
 }
 
 async function init() {
+  initTheme()
   initWave()
   if (state.lines.length === 0) showEmptyState()
   state.probe = await api.probe()

@@ -1,36 +1,22 @@
-/* LocalVoice — 深色录音工作台。深色为主，浅色跟随系统。 */
+/* LocalVoice — 深色录音工作台。深浅两套配色，可手动切换。 */
 
 :root {
-  color-scheme: dark light;
-  --bg: #0b0d11;
-  --bg-2: #12151b;
-  --panel: rgba(255, 255, 255, 0.045);
-  --panel-line: rgba(255, 255, 255, 0.085);
-  --fg: #e9ecf2;
-  --fg-2: rgba(233, 236, 242, 0.72);
-  --fg-3: rgba(233, 236, 242, 0.42);
-  --fg-4: rgba(233, 236, 242, 0.26);
-  --accent: #6f9bff;
-  --accent-2: #a37bff;
-  --live: #ff5d5d;
-  --ok: #4ade80;
+  /* light-dark(浅色, 深色)：由 color-scheme 决定用哪一个，无需复制两套变量 */
+  color-scheme: light dark;
+  --bg: light-dark(#f4f6f9, #0b0d11);
+  --bg-2: light-dark(#ffffff, #12151b);
+  --panel: light-dark(rgba(17, 20, 26, 0.038), rgba(255, 255, 255, 0.045));
+  --panel-line: light-dark(rgba(17, 20, 26, 0.09), rgba(255, 255, 255, 0.085));
+  --fg: light-dark(#14161b, #e9ecf2);
+  --fg-2: light-dark(rgba(20, 22, 27, 0.76), rgba(233, 236, 242, 0.72));
+  --fg-3: light-dark(rgba(20, 22, 27, 0.5), rgba(233, 236, 242, 0.42));
+  --fg-4: light-dark(rgba(20, 22, 27, 0.3), rgba(233, 236, 242, 0.26));
+  --accent: light-dark(#3b74e8, #6f9bff);
+  --accent-2: light-dark(#7b5cf0, #a37bff);
+  --live: light-dark(#e14b4b, #ff5d5d);
+  --glow: light-dark(rgba(59, 116, 232, 0.09), rgba(111, 155, 255, 0.13));
+  --shadow: light-dark(0 10px 30px rgba(16, 24, 40, 0.1), 0 10px 30px rgba(0, 0, 0, 0.28));
   --radius: 14px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f7f9;
-    --bg-2: #ffffff;
-    --panel: rgba(17, 20, 26, 0.035);
-    --panel-line: rgba(17, 20, 26, 0.08);
-    --fg: #14161b;
-    --fg-2: rgba(20, 22, 27, 0.74);
-    --fg-3: rgba(20, 22, 27, 0.46);
-    --fg-4: rgba(20, 22, 27, 0.28);
-    --accent: #3b74e8;
-    --accent-2: #7b5cf0;
-    --live: #e14b4b;
-  }
 }
 
 * { box-sizing: border-box; }
@@ -41,7 +27,7 @@ body {
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(120% 60% at 50% -10%, rgba(111, 155, 255, 0.13), transparent 70%),
+    radial-gradient(120% 60% at 50% -10%, var(--glow), transparent 70%),
     var(--bg);
   color: var(--fg);
   font: 14px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
@@ -101,6 +87,22 @@ body.platform-darwin .topbar { padding-left: 82px; }
   transition: height 0.1s linear, background 0.25s ease;
 }
 .wave.live i { background: color-mix(in srgb, var(--live) 45%, transparent); }
+
+button.theme {
+  flex: none;
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+button.theme:hover { background: var(--panel); color: var(--fg); border-color: var(--panel-line); }
+button.theme svg { display: none; }
+:root[data-theme="light"] button.theme .i-moon { display: block; }
+:root[data-theme="dark"] button.theme .i-sun { display: block; }
 
 select {
   flex: none;
@@ -196,7 +198,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   color: var(--fg-3);
   background: var(--panel);
   border: 1px solid var(--panel-line);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow);
 }
 .ph-title { margin: 4px 0 0; font-size: 14.5px; font-weight: 600; color: var(--fg-2); }
 .ph-hint { margin: 0; font-size: 12px; color: var(--fg-4); max-width: 300px; line-height: 1.65; }
@@ -214,7 +216,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   border-radius: var(--radius);
   border: 1px solid var(--panel-line);
   background: color-mix(in srgb, var(--bg-2) 82%, transparent);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
 }
 
@@ -255,8 +257,9 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .stats { font-size: 10.5px; color: var(--fg-4); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .tools { margin-left: auto; display: flex; gap: 4px; }
+[data-tip] { position: relative; }
+
 button.icon {
-  position: relative;
   width: 32px; height: 32px;
   display: grid; place-items: center;
   border-radius: 9px;
@@ -276,7 +279,7 @@ button.icon:active { transform: scale(0.94); }
 button.icon:disabled { opacity: 0.26; cursor: default; background: transparent; border-color: transparent; }
 
 /* 悬停提示：原生 title 太慢又丑，这里自己做一个小气泡 */
-button.icon::after {
+[data-tip]::after {
   content: attr(data-tip);
   position: absolute;
   bottom: calc(100% + 9px);
@@ -295,7 +298,7 @@ button.icon::after {
   transition: opacity 0.13s ease, transform 0.13s ease;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
 }
-button.icon:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+[data-tip]:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
 button.icon:disabled::after { opacity: 0; }
 
 /* 底坞顶部的收音电平细线 */
