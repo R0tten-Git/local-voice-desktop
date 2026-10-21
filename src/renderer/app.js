@@ -57,6 +57,9 @@ const el = {
   state: document.getElementById('state'),
   stats: document.getElementById('stats'),
   diag: document.getElementById('diag'),
+  meter: document.getElementById('meter'),
+  meterFill: document.getElementById('meterFill'),
+  meterLine: document.getElementById('meterLine'),
   copy: document.getElementById('copy'),
   save: document.getElementById('save'),
   clear: document.getElementById('clear'),
@@ -165,6 +168,22 @@ function concatFrames(frames) {
     offset += frame.length
   }
   return out
+}
+
+/** 空状态：图标 + 一句引导。 */
+const EMPTY_STATE = `
+  <div class="placeholder">
+    <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
+    </svg>
+    <p class="ph-title">点下面的按钮开始说话</p>
+    <p class="ph-hint">说完一句稍作停顿，就会在这里出一行字。全程本地处理，音频不会上传。</p>
+  </div>`
+
+function showEmptyState() {
+  el.transcript.innerHTML = EMPTY_STATE
 }
 
 // ------------------------------------------------------------------ 录音
@@ -520,10 +539,12 @@ function pushLine(text, ts) {
 
 function appendMessage(text) {
   const node = document.createElement('div')
-  node.className = 'line'
-  node.style.color = 'var(--danger)'
-  node.textContent = text
+  node.className = 'line error'
+  const body = document.createElement('span')
+  body.textContent = text
+  node.append(body)
   el.transcript.append(node)
+  el.transcript.scrollTop = el.transcript.scrollHeight
 }
 
 // ------------------------------------------------------------------ 会话
@@ -591,7 +612,7 @@ function clearAll() {
   state.peak = 0
   state.threshold = 0
   state.phase = 'idle'
-  el.transcript.innerHTML = '<p class="placeholder">点右下角的 ▶ 开始说话。说完一句停一下，就会出一行字。</p>'
+  showEmptyState()
   render()
 }
 
@@ -624,6 +645,14 @@ function render() {
     (state.lastInferenceMs > 0 ? ` · 推理 ${state.lastInferenceMs}ms` : '') +
     notice
   el.diag.classList.toggle('warn', notice !== '')
+
+  // 电平条：开方压缩动态范围，说话时才有明显的跳动
+  if (el.meterFill) {
+    const scale = (value) => Math.min(100, Math.sqrt(Math.max(0, value) / 0.06) * 100)
+    el.meterFill.style.width = `${scale(state.level)}%`
+    el.meterLine.style.left = `${scale(state.threshold)}%`
+    el.meter.classList.toggle('silent', state.level < state.threshold)
+  }
 
   for (const button of [el.copy, el.save, el.clear]) button.disabled = state.lines.length === 0
 
@@ -732,6 +761,7 @@ async function startDownload() {
 }
 
 async function init() {
+  if (state.lines.length === 0) showEmptyState()
   state.probe = await api.probe()
   document.body.classList.add(`platform-${state.probe.platform}`)
   const { options, recommended, installed, backend, totalRamGb, gpuName } = state.probe
