@@ -12,4 +12,11 @@ window.localVoice.onStatus((status) => {
   meta.textContent = status.chars > 0 ? `${status.chars} 字` : ''
 })
 
-document.body.addEventListener('click', () => window.localVoice.showMain())
+// 点击（握把以外）回到主窗口
+document.body.addEventListener('click', (event) => {
+  if (event.target.closest('.grip')) return
+  window.localVoice.showMain()
+})
+
+// 双击也回主窗口，手感更接近系统小组件
+document.body.addEventListener('dblclick', () => window.localVoice.showMain())

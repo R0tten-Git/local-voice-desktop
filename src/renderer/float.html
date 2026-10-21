@@ -16,10 +16,24 @@
         color: #f2f3f5;
         border-radius: 12px;
         border: 1px solid rgba(255, 255, 255, 0.12);
-        -webkit-app-region: drag;
+        /* 整块不能设成 drag：拖动区域会吞掉鼠标事件，click 永远不触发。
+           只有左边的小握把可以拖，其余区域留给点击。 */
+        -webkit-app-region: no-drag;
         user-select: none;
-        cursor: default;
+        cursor: pointer;
       }
+      .grip {
+        -webkit-app-region: drag;
+        cursor: grab;
+        align-self: stretch;
+        width: 22px;
+        margin-left: -8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+      }
+      .grip:active { cursor: grabbing; }
       .dot {
         width: 8px; height: 8px; border-radius: 50%;
         background: #ff5b5b; flex: none;
@@ -32,7 +46,7 @@
     </style>
   </head>
   <body>
-    <span id="dot" class="dot"></span>
+    <span class="grip" title="拖动移动位置"><span id="dot" class="dot"></span></span>
     <span id="time" class="time">00:00</span>
     <span id="meta" class="meta"></span>
     <script src="float.js"></script>
