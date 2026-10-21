@@ -22,6 +22,14 @@ contextBridge.exposeInMainWorld('localVoice', {
     return () => ipcRenderer.removeListener('model:progress', listener)
   },
   reportStatus: (status) => ipcRenderer.send('status:update', status),
+  /** 悬浮窗专用：接收主进程广播的状态 */
+  onStatus: (callback) => {
+    const listener = (_event, status) => callback(status)
+    ipcRenderer.on('status:sync', listener)
+    return () => ipcRenderer.removeListener('status:sync', listener)
+  },
+  /** 悬浮窗点击后回到主窗口 */
+  showMain: () => ipcRenderer.send('float:show-main'),
   onCommand: (callback) => {
     const listener = (_event, command) => callback(command)
     ipcRenderer.on('command:show', listener)

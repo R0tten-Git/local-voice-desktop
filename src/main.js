@@ -30,6 +30,56 @@ function logLine(line) {
 
 const engine = new Engine(logLine)
 
+// ------------------------------------------------------------------ 悬浮窗
+
+/** @type {BrowserWindow | undefined} */
+let floatWindow
+
+function createFloatWindow() {
+  if (floatWindow) return floatWindow
+  floatWindow = new BrowserWindow({
+    width: 168,
+    height: 46,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  floatWindow.setAlwaysOnTop(true, 'floating')
+  floatWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  floatWindow.loadFile(path.join(__dirname, 'renderer', 'float.html'))
+
+  // 放在屏幕右上角，避开菜单栏
+  const { workArea } = require('electron').screen.getPrimaryDisplay()
+  floatWindow.setPosition(workArea.x + workArea.width - 190, workArea.y + 12)
+  return floatWindow
+}
+
+function showFloat() {
+  const win = createFloatWindow()
+  if (!win) return
+  win.webContents.send('status:sync', status)
+  win.showInactive()
+}
+
+function hideFloat() {
+  floatWindow?.hide()
+}
+
+ipcMain.on('float:show-main', () => showWindow())
+
 // ------------------------------------------------------------------ 菜单栏
 
 /** @type {Tray | undefined} */
@@ -76,11 +126,18 @@ function refreshTray() {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'trayTemplate.png'))
-  icon.setTemplateImage(true)
-  tray = new Tray(icon)
-  tray.on('click', () => showWindow())
-  refreshTray()
+  try {
+    const iconPath = path.join(__dirname, '..', 'assets', 'trayTemplate.png')
+    const icon = nativeImage.createFromPath(iconPath)
+    logLine(`托盘图标：${iconPath} 尺寸=${icon.getSize().width}x${icon.getSize().height} 空=${icon.isEmpty()}`)
+    icon.setTemplateImage(true)
+    tray = new Tray(icon)
+    tray.on('click', () => showWindow())
+    refreshTray()
+    logLine('托盘已创建')
+  } catch (error) {
+    logLine(`托盘创建失败：${error.message}`)
+  }
 }
 
 function showWindow() {
@@ -94,8 +151,13 @@ function showWindow() {
 }
 
 ipcMain.on('status:update', (_event, next) => {
+  const changed = status.phase !== next.phase
   status = { ...status, ...next }
   refreshTray()
+  // 只有录音/暂停时才浮出来，空闲就藏起来
+  if (status.phase === 'idle') hideFloat()
+  else floatWindow?.webContents.send('status:sync', status)
+  if (changed) logLine(`状态：${next.phase} 时长=${Math.round(next.elapsedMs / 1000)}s`)
 })
 
 /** 模型目录：默认 ~/models/<仓库名>。 */
@@ -145,6 +207,16 @@ app.whenReady().then(() => {
 
   createWindow()
   createTray()
+
+  // 主窗口收起时用悬浮小球接管"Yes 还在录音"的反馈
+  window.on('minimize', () => {
+    if (status.phase === 'recording' || status.phase === 'paused') showFloat()
+  })
+  window.on('restore', () => hideFloat())
+  window.on('hide', () => {
+    if (status.phase === 'recording' || status.phase === 'paused') showFloat()
+  })
+  window.on('show', () => hideFloat())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

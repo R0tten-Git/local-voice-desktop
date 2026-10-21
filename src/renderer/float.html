@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>LocalVoice 悬浮窗</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; }
+      body {
+        font-family: -apple-system, "PingFang SC", system-ui, sans-serif;
+        display: flex; align-items: center; gap: 8px;
+        padding: 0 12px;
+        background: rgba(24, 26, 30, 0.92);
+        color: #f2f3f5;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        -webkit-app-region: drag;
+        user-select: none;
+        cursor: default;
+      }
+      .dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #ff5b5b; flex: none;
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      .dot.paused { background: #f0b429; animation: none; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+      .time { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; letter-spacing: 0.02em; }
+      .meta { font-size: 11px; opacity: 0.62; margin-left: auto; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <span id="dot" class="dot"></span>
+    <span id="time" class="time">00:00</span>
+    <span id="meta" class="meta"></span>
+    <script src="float.js"></script>
+  </body>
+</html>
