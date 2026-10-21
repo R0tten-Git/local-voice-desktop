@@ -14,18 +14,18 @@ const LIVE = {
    * 硬上限。连续说话时靠它兜底，切得越碎越容易切在句子中间。
    * 实时感由"临时结果"负责，所以这里可以放宽。
    */
-  maxChunkMs: 20000,
+  maxChunkMs: 15000,
   /** 一段超过这么久之后，遇到 350ms 的短停顿就切（逗号级停顿，不会劈开词组） */
-  midCutAfterMs: 5000,
-  midSilenceMs: 350,
+  midCutAfterMs: 4000,
+  midSilenceMs: 250,
   /** 边说边出的临时结果：每隔这么久把当前缓冲送一次识别 */
-  partialEveryMs: 2200,
+  partialEveryMs: 1500,
   /** 推理慢的机器（CPU）自动放宽到这个间隔，否则临时结果会占满算力 */
   partialEverySlowMs: 5000,
   /** 单次推理超过这个时间就算"慢机器" */
   slowInferenceMs: 1200,
   /** 临时结果最多用多长的音频（越长越慢，10 秒够覆盖一句话） */
-  partialWindowMs: 10000,
+  partialWindowMs: 8000,
   /** 至少要说这么久才值得送一次临时结果 */
   partialMinMs: 1500,
   calibrateMs: 1200,
