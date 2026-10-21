@@ -153,16 +153,39 @@ function concatFrames(frames) {
 
 // ------------------------------------------------------------------ 录音
 
-async function openMicrophone(onChunk, onPartial) {
+async function openMicrophone(onChunk, onPartial, onError) {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
   const AudioCtor = window.AudioContext ?? window.webkitAudioContext
   const audio = new AudioCtor({ sampleRate: LIVE.sampleRate })
+  // 有些平台（尤其 Windows）创建后是 suspended，不 resume 就永远收不到帧，
+  // 表现就是阈值一直停在"校准中"。
+  if (audio.state !== 'running') {
+    try {
+      await audio.resume()
+    } catch {
+      /* 下面用看门狗兜底 */
+    }
+  }
   const source = audio.createMediaStreamSource(stream)
   const processor = audio.createScriptProcessor(4096, 1, 1)
   source.connect(processor)
   processor.connect(audio.destination)
+
+  // 看门狗：3 秒内一帧都没收到，几乎肯定是权限或设备问题，直接报错而不是干等
+  let framesSeen = 0
+  const watchdog = setInterval(() => {
+    if (framesSeen > 0) return
+    clearInterval(watchdog)
+    onError?.(
+      new Error(
+        audio.state === 'suspended'
+          ? '音频上下文处于挂起状态，没收到麦克风数据'
+          : '没有收到麦克风音频，请检查系统设置里的麦克风权限，或换一个输入设备',
+      ),
+    )
+  }, 3000)
 
   /** 最近若干帧的环形缓冲，只在"没在说话"时维护 */
   const preroll = []
@@ -455,6 +478,7 @@ function appendMessage(text) {
 // ------------------------------------------------------------------ 会话
 
 async function start() {
+  state.notice = ''
   const modelId = el.model.value
   el.state.textContent = '引擎加载中…'
   render()
@@ -464,13 +488,22 @@ async function start() {
     state.session = await openMicrophone(
       (samples) => transcribe(samples),
       (samples) => transcribePartial(samples),
+      (error) => {
+        state.session?.stop()
+        state.session = undefined
+        clearInterval(state.timer)
+        state.timer = undefined
+        state.phase = 'idle'
+        state.notice = `麦克风不可用：${error.message}`
+        render()
+      },
     )
     state.phase = 'recording'
     state.startedAt = Date.now()
     state.timer = setInterval(render, 500)
     render()
   } catch (error) {
-    el.state.textContent = `启动失败：${error.message ?? error}`
+    state.notice = `启动失败：${error.message ?? error}`
     state.phase = state.lines.length > 0 ? 'paused' : 'idle'
     render()
   }
@@ -523,7 +556,8 @@ function render() {
     el.state.classList.remove('live')
     // 暂停后必须改写这行，否则会一直挂着"录音中"
     el.state.textContent =
-      state.lines.length > 0 ? `已暂停 ${elapsedText(state.accumulated)}` : '就绪'
+      state.notice ||
+      (state.lines.length > 0 ? `已暂停 ${elapsedText(state.accumulated)}` : '就绪')
   }
 
   const chars = state.lines.reduce((sum, line) => sum + line.text.length, 0)
