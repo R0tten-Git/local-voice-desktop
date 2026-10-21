@@ -1,6 +1,6 @@
 {
   "name": "local-voice-desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "description": "Local, offline real-time speech-to-text for macOS and Windows — Qwen3-ASR, no cloud, no account.",
   "type": "commonjs",
@@ -18,8 +18,8 @@
   "scripts": {
     "dev": "electron .",
     "probe": "node scripts/probe.js",
-    "build:mac": "electron-builder --mac --arm64",
-    "build:win": "electron-builder --win --x64"
+    "build:mac": "electron-builder --mac --arm64 --publish never",
+    "build:win": "electron-builder --win --x64 --publish never"
   },
   "devDependencies": {
     "electron": "^33.2.0",
