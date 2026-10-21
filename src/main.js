@@ -1,7 +1,7 @@
 /**
  * Electron 主进程：窗口、麦克风权限、引擎 IPC。
  */
-const { app, BrowserWindow, ipcMain, session, shell, dialog, clipboard, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, session, shell, dialog, clipboard, Tray, Menu, nativeImage, nativeTheme } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -205,8 +205,74 @@ app.whenReady().then(() => {
   })
   session.defaultSession.setPermissionCheckHandler((_contents, permission) => permission === 'media')
 
+  if (process.env.LOCALVOICE_SNAPSHOT_THEME) {
+    nativeTheme.themeSource = process.env.LOCALVOICE_SNAPSHOT_THEME
+  }
+
   createWindow()
   createTray()
+
+  // 开发用：设了 LOCALVOICE_SNAPSHOT 就把窗口内容存成 PNG 后退出
+  if (process.env.LOCALVOICE_SNAPSHOT) {
+    window.webContents.once('did-finish-load', () => {
+      setTimeout(async () => {
+        if (process.env.LOCALVOICE_SNAPSHOT_DEMO) {
+          try {
+            const injected = await window.webContents.executeJavaScript(`
+            (() => {
+              const rows = [
+                ['23:04:27', '首先来猜一猜，下面哪些是现代最重的动物？'],
+                ['23:04:32', '是从这个像素运用到这个像素，沿着画好的路径。'],
+                ['23:04:40', '是时光飞逝，恰好存在六点十五分，是地图上一个真实的坐标，一段精准的海岸线。'],
+                ['23:04:48', '是一字不差的文字，用代码代替你，是用傅里叶函数画出的樱花。'],
+                ['23:04:50', '答案是以上所有。'],
+              ]
+              const host = document.querySelector('.transcript')
+              host.innerHTML = ''
+              document.querySelector('#state').textContent = '录音中 00:54'
+              document.querySelector('#state').classList.add('live')
+              document.querySelector('#stats').textContent = '288 字 · 11 句'
+              document.querySelector('#toggle').textContent = '❚❚'
+              document.querySelector('#toggle').classList.add('live')
+              document.querySelector('#meterFill').style.width = '46%'
+              for (const id of ['copy', 'save', 'clear']) document.getElementById(id).disabled = false
+              document.querySelector('#meterLine').style.left = '12%'
+              document.querySelector('#diag').textContent =
+                '电平 0.0121 · 峰值 0.2250 · 阈值 0.0035 · MacBook Air 麦克风 · 48000Hz · 推理 297ms'
+              for (const [ts, text] of rows) {
+                const line = document.createElement('div')
+                line.className = 'line'
+                const time = document.createElement('time')
+                time.textContent = ts
+                const span = document.createElement('span')
+                span.textContent = text
+                line.append(time, span)
+                host.append(line)
+              }
+              const partial = document.createElement('div')
+              partial.className = 'line partial'
+              const t2 = document.createElement('time')
+              t2.textContent = '23:04:56'
+              const s2 = document.createElement('span')
+              s2.textContent = '各种 AI 平台，包括 Cloud'
+              partial.append(t2, s2)
+              host.append(partial)
+              return host.children.length
+            })()
+          `)
+            console.error('[snapshot] 注入结果:', injected)
+            // DOM 改完要等一帧真正画出来，否则抓到的还是旧画面
+            await new Promise((resolve) => setTimeout(resolve, 800))
+          } catch (error) {
+            console.error('[snapshot] 注入失败:', error.message)
+          }
+        }
+        const image = await window.webContents.capturePage()
+        fs.writeFileSync(process.env.LOCALVOICE_SNAPSHOT, image.toPNG())
+        app.quit()
+      }, process.env.LOCALVOICE_SNAPSHOT_DEMO ? 5200 : 2500)
+    })
+  }
 
   // 主窗口收起时用悬浮小球接管"Yes 还在录音"的反馈
   window.on('minimize', () => {

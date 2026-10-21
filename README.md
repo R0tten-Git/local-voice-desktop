@@ -5,6 +5,8 @@
 > 这是独立桌面应用（Electron），与 DSH 插件版是两套东西：
 > 插件版见 [dsh-plugin-local-voice](https://github.com/R0tten-Git/dsh-plugin-local-voice)。
 
+![LocalVoice](docs/screenshot.png)
+
 ## 它做什么
 
 - 独立窗口，**边说边出字**：说话过程中每 2.2 秒刷新一版灰色临时结果，说完一句替换成定稿

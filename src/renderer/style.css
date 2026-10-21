@@ -184,11 +184,11 @@ select:focus-visible {
 /* 实时电平条：一眼看出"有没有在收音" */
 .meter {
   position: relative;
-  height: 3px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  height: 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
   overflow: hidden;
-  margin-bottom: 10px;
+  margin: 0 2px 11px;
 }
 .meter-hit {
   position: absolute;
@@ -201,12 +201,13 @@ select:focus-visible {
 .meter.silent .meter-hit { background: color-mix(in srgb, var(--fg) 30%, transparent); }
 .meter-threshold {
   position: absolute;
-  top: -2px;
-  bottom: -2px;
+  top: 0;
+  bottom: 0;
   width: 1.5px;
   left: 0;
-  background: color-mix(in srgb, var(--fg) 30%, transparent);
+  background: color-mix(in srgb, var(--fg) 26%, transparent);
   border-radius: 1px;
+  transition: left 0.4s ease;
 }
 
 .row {
