@@ -1,0 +1,257 @@
+/**
+ * Python 引擎桥：管理常驻的 Qwen3-ASR 进程。
+ *
+ * 协议与 DSH 插件版完全一致（ndjson over stdio），所以两端共用同一个 worker.py：
+ *   启动完成 → {"type":"ready"}
+ *   请求     → {"id":1,"wav":"<base64 WAV 16k mono pcm16>","language":"auto"}
+ *   应答     → {"id":1,"text":"…","ms":620,"audioSec":3.1}
+ *
+ * 设计要点：
+ *  · 模型只在启动时加载一次；
+ *  · 空闲一段时间自动回收（省内存）；
+ *  · 从睡眠唤醒后主动换新进程（Metal 上下文可能已失效）；
+ *  · 传输层失败自动重启重试一次。
+ */
+const { spawn } = require('node:child_process')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+
+const READY_TIMEOUT_MS = 180_000
+const REQUEST_TIMEOUT_MS = 120_000
+const IDLE_MS = 300_000
+const WAKE_GAP_MS = 90_000
+
+/** 打包后 worker 在 resources/engine，开发时在仓库的 engine/。 */
+function workerScript() {
+  const candidates = [
+    path.join(process.resourcesPath ?? '', 'engine', 'worker.py'),
+    path.join(__dirname, '..', 'engine', 'worker.py'),
+  ]
+  return candidates.find((p) => fs.existsSync(p)) ?? candidates[1]
+}
+
+/** 找一个能跑 mlx-audio 的 python。 */
+function findPython() {
+  const candidates = [
+    process.env.LOCAL_VOICE_PYTHON,
+    path.join(os.homedir(), '.local/venvs/mlx-audio/bin/python'),
+    '/opt/homebrew/bin/python3',
+    '/usr/bin/python3',
+  ].filter(Boolean)
+  return candidates.find((p) => fs.existsSync(p)) ?? 'python3'
+}
+
+function isTransportFailure(error) {
+  return /worker|管道|pipe|EPIPE|closed|不可用|超时|已退出/i.test(String(error && error.message))
+}
+
+class Engine {
+  constructor(log = () => {}) {
+    this.log = log
+    this.child = undefined
+    this.starting = undefined
+    this.onReady = undefined
+    this.buffer = ''
+    this.pending = new Map()
+    this.seq = 0
+    this.idle = undefined
+    this.lastUsedAt = undefined
+    this.model = undefined
+  }
+
+  get running() {
+    return this.child !== undefined
+  }
+
+  /** 启动（或确认已启动）引擎。 */
+  async ensure(modelPath) {
+    if (!modelPath) throw new Error('未指定模型目录：先调用 ensure(modelPath) 或 engine:start')
+    if (this.child && this.model !== modelPath) {
+      this.log(`切换模型：${path.basename(this.model ?? '')} → ${path.basename(modelPath)}`)
+      this.kill()
+    }
+    if (this.child !== undefined && this.onReady === undefined) return
+    if (this.starting === undefined) {
+      this.model = modelPath
+      this.starting = this.start(modelPath).catch((error) => {
+        this.starting = undefined
+        throw error
+      })
+    }
+    await this.starting
+  }
+
+  /** 拉起子进程并等 ready。 */
+  start(modelPath) {
+    return new Promise((resolve, reject) => {
+      const python = findPython()
+      const script = workerScript()
+      this.log(`启动引擎：${python} ${script} ${modelPath}`)
+      let child
+      try {
+        child = spawn(python, [script, modelPath], { stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch (error) {
+        reject(error)
+        return
+      }
+      this.child = child
+      let settled = false
+      let timer
+      const settle = (error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        this.onReady = undefined
+        if (error) {
+          this.starting = undefined
+          this.log(`引擎失败：${error.message}`)
+          this.kill()
+          reject(error)
+        } else {
+          this.armIdle()
+          resolve()
+        }
+      }
+      timer = setTimeout(() => settle(new Error('模型加载超时')), READY_TIMEOUT_MS)
+      this.onReady = () => settle()
+
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk) => this.receive(chunk))
+      child.stderr.setEncoding('utf8')
+      child.stderr.on('data', (chunk) => {
+        for (const line of String(chunk).split('\n')) {
+          if (line.trim()) this.log(line.trim())
+        }
+      })
+      child.on('error', (error) => settle(error))
+      child.on('exit', (code, signal) => {
+        this.failAll(new Error(`引擎已退出（code=${code}, signal=${signal}）`))
+        if (!settled) settle(new Error(`引擎退出（code=${code}）`))
+        this.child = undefined
+        this.starting = undefined
+      })
+    })
+  }
+
+  receive(chunk) {
+    this.buffer += chunk
+    let index
+    while ((index = this.buffer.indexOf('\n')) >= 0) {
+      const line = this.buffer.slice(0, index).trim()
+      this.buffer = this.buffer.slice(index + 1)
+      if (line) this.dispatch(line)
+    }
+  }
+
+  dispatch(line) {
+    let message
+    try {
+      message = JSON.parse(line)
+    } catch {
+      this.log(`忽略无法解析的输出：${line.slice(0, 120)}`)
+      return
+    }
+    if (message.type === 'ready') {
+      this.onReady?.()
+      return
+    }
+    const entry = this.pending.get(message.id)
+    if (!entry) return
+    this.pending.delete(message.id)
+    clearTimeout(entry.timer)
+    if (typeof message.error === 'string') {
+      entry.reject(new Error(message.error))
+    } else {
+      entry.resolve({
+        text: message.text ?? '',
+        audioSeconds: message.audioSec ?? 0,
+        inferenceSeconds: (message.ms ?? 0) / 1000,
+      })
+    }
+  }
+
+  failAll(error) {
+    for (const entry of this.pending.values()) {
+      clearTimeout(entry.timer)
+      entry.reject(error)
+    }
+    this.pending.clear()
+  }
+
+  /** 转写一段 16kHz 单声道 PCM16 WAV。 */
+  async transcribe(wav, language = 'auto') {
+    if (!this.model) throw new Error('引擎尚未启动：请先选择模型')
+    const now = Date.now()
+    if (this.child && this.lastUsedAt && now - this.lastUsedAt > WAKE_GAP_MS) {
+      this.log('长时间空闲，视为刚唤醒，重启引擎')
+      this.kill()
+    }
+    try {
+      const result = await this.attempt(wav, language)
+      this.lastUsedAt = Date.now()
+      return result
+    } catch (error) {
+      if (!isTransportFailure(error)) throw error
+      this.log(`传输层失败（${error.message}），重启后重试一次`)
+      this.kill()
+      const result = await this.attempt(wav, language)
+      this.lastUsedAt = Date.now()
+      return result
+    }
+  }
+
+  async attempt(wav, language) {
+    await this.ensure(this.model)
+    const child = this.child
+    if (!child) throw new Error('引擎不可用')
+    const id = ++this.seq
+    const result = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error('识别超时'))
+      }, REQUEST_TIMEOUT_MS)
+      this.pending.set(id, { resolve, reject, timer })
+    })
+    child.stdin.write(`${JSON.stringify({ id, wav: wav.toString('base64'), language })}\n`)
+    this.armIdle()
+    return await result
+  }
+
+  armIdle() {
+    clearTimeout(this.idle)
+    this.idle = setTimeout(() => {
+      if (this.pending.size === 0 && this.child) {
+        this.log('空闲回收引擎')
+        this.kill()
+      }
+    }, IDLE_MS)
+    this.idle.unref?.()
+  }
+
+  kill() {
+    clearTimeout(this.idle)
+    const child = this.child
+    this.child = undefined
+    this.starting = undefined
+    this.onReady = undefined
+    this.buffer = ''
+    this.failAll(new Error('引擎已停止'))
+    if (!child) return
+    try {
+      child.stdin.end()
+      child.kill('SIGTERM')
+      setTimeout(() => {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          /* 已经没了 */
+        }
+      }, 2000).unref?.()
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+module.exports = { Engine, findPython, workerScript }

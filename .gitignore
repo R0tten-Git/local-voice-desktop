@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+*.tgz
+*.log
+.DS_Store
+__pycache__/
+*.py[cod]
+models/

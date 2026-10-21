@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>LocalVoice</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <span class="brand">LocalVoice</span>
+      <span class="sub">本地实时语音转写</span>
+      <span class="spacer"></span>
+      <select id="model" title="识别模型"></select>
+    </header>
+
+    <section id="setup" class="setup hidden">
+      <div class="setup-head">
+        <strong>还没有可用的模型</strong>
+        <span class="muted">首次使用需要下载 0.7–2.5 GB</span>
+      </div>
+      <div id="recommend" class="recommend"></div>
+      <div class="setup-actions">
+        <button id="openModels" class="ghost">打开模型文件夹</button>
+        <button id="copyCmd" class="ghost">复制下载命令</button>
+      </div>
+      <pre id="cmd" class="cmd"></pre>
+      <p class="muted small">下载完成后点上面的下拉框重新选择模型即可，无需重启。</p>
+    </section>
+
+    <main id="transcript" class="transcript" aria-live="polite">
+      <p class="placeholder">点右下角的 ▶ 开始说话。说完一句停一下，就会出一行字。</p>
+    </main>
+
+    <footer class="footer">
+      <div class="row">
+        <button id="toggle" class="primary" title="开始 / 暂停">▶</button>
+        <span id="state" class="state">就绪</span>
+        <span class="spacer"></span>
+        <span id="stats" class="stats"></span>
+        <button id="copy" class="ghost" title="复制全文">复制</button>
+        <button id="save" class="ghost" title="保存为 Markdown">存 md</button>
+        <button id="clear" class="ghost" title="清空本次转写">清空</button>
+      </div>
+      <div id="diag" class="diag"></div>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
