@@ -868,11 +868,26 @@ el.copy.addEventListener('click', () => {
   void api.copy(text)
   el.state.textContent = `已复制 ${text.length} 字`
 })
-el.save.addEventListener('click', async () => {
+/** 把当前转写存成 markdown。返回是否真的写盘了（用户可能取消）。 */
+async function saveTranscript() {
   const header = `# 实时转写 ${new Date().toLocaleString('zh-CN')}\n\n- 模型：${el.model.selectedOptions[0]?.textContent ?? ''}\n\n`
   const body = state.lines.map((line) => `[${line.ts}] ${line.text}`).join('\n')
   const result = await api.saveMarkdown(`${header}${body}\n`, `localvoice-${fileStamp()}.md`)
-  if (result.saved) el.state.textContent = `已保存 ${result.filePath}`
+  if (result.saved) {
+    state.notice = `已保存 ${result.filePath}`
+    render()
+  }
+  return result.saved === true
+}
+
+el.save.addEventListener('click', () => void saveTranscript())
+
+// 主进程问完"要保存吗"之后，走这里：存成功才关窗
+api.onCommand(async (command) => {
+  if (command === 'command:save-then-close') {
+    const saved = await saveTranscript()
+    if (saved) api.closeNow()
+  }
 })
 el.copyCmd.addEventListener('click', () => {
   void api.copy(el.cmd.textContent)

@@ -30,10 +30,13 @@ contextBridge.exposeInMainWorld('localVoice', {
   },
   /** 悬浮窗点击后回到主窗口 */
   showMain: () => ipcRenderer.send('float:show-main'),
+  /** 保存完成后请求关闭窗口 */
+  closeNow: () => ipcRenderer.send('app:close-now'),
   onCommand: (callback) => {
     const listener = (_event, command) => callback(command)
     ipcRenderer.on('command:show', listener)
     ipcRenderer.on('command:toggle', listener)
+    ipcRenderer.on('command:save-then-close', listener)
     return () => ipcRenderer.removeListener('command:toggle', listener)
   },
   openModelsFolder: () => ipcRenderer.invoke('app:openModelsFolder'),

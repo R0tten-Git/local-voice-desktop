@@ -80,12 +80,19 @@ function hideFloat() {
 
 ipcMain.on('float:show-main', () => showWindow())
 
+ipcMain.on('app:close-now', () => {
+  closing = true
+  window?.close()
+})
+
 // ------------------------------------------------------------------ 菜单栏
 
 /** @type {Tray | undefined} */
 let tray
 /** 最近一次上报的状态，菜单栏和菜单文案都靠它 */
 let status = { phase: 'idle', elapsedMs: 0, chars: 0 }
+/** 用户在关闭对话框里已做出选择，后续 close 不再拦截 */
+let closing = false
 /** 菜单文案没变就不重建，否则每 500ms 重建一次菜单 */
 let lastMenuLabel = ''
 
@@ -178,6 +185,7 @@ function installed() {
 }
 
 function createWindow() {
+  closing = false
   window = new BrowserWindow({
     width: 520,
     height: 640,
@@ -204,6 +212,30 @@ function createWindow() {
   })
   window.on('restore', () => hideFloat())
   window.on('show', () => hideFloat())
+  // 关窗保护：有内容时先问要不要保存，避免一键 X 丢掉整场转写
+  window.on('close', (event) => {
+    if (closing) return
+    if (status.chars <= 0) return
+    event.preventDefault()
+
+    const choice = dialog.showMessageBoxSync(window, {
+      type: 'question',
+      buttons: ['保存并关闭', '直接关闭', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+      message: '关闭前要保存这次转写吗？',
+      detail: `本次共 ${status.chars} 字，直接关闭将无法恢复。`,
+    })
+    if (choice === 2) return
+    if (choice === 1) {
+      closing = true
+      window.close()
+      return
+    }
+    window.webContents.send('command:save-then-close')
+  })
+
   window.on('closed', () => {
     hideFloat()
     window = undefined
