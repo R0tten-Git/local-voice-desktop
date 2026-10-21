@@ -34,13 +34,80 @@ const IMPORT_CHECK = BACKEND === 'mlx'
   : 'import torch, transformers, numpy, scipy'
 
 /** 找系统 python3（用来引导 uv）。 */
-function systemPython() {
+/**
+ * 找系统 Python。
+ *
+ * Windows 上不能假设 `python` 存在：常见情况是只有 `py` 启动器，或者只有
+ * 微软商店的占位符（执行返回 9009）。所以逐个真的跑一次 `--version`。
+ *
+ * @returns {Promise<{cmd: string, prefix: string[]} | undefined>}
+ */
+async function detectPython(onLog = () => {}) {
+  /** @type {Array<{cmd: string, prefix: string[]}>} */
   const candidates = IS_WIN
-    ? ['python', 'py']
-    : ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3']
-  // Windows 上 'python'/'py' 要走 PATH，存在性由 run() 决定
-  if (IS_WIN) return 'python'
-  return candidates.find((p) => fs.existsSync(p))
+    ? [
+        { cmd: 'py', prefix: ['-3'] },
+        { cmd: 'python', prefix: [] },
+        { cmd: 'python3', prefix: [] },
+      ]
+    : [
+        { cmd: '/usr/bin/python3', prefix: [] },
+        { cmd: '/opt/homebrew/bin/python3', prefix: [] },
+        { cmd: '/usr/local/bin/python3', prefix: [] },
+        { cmd: 'python3', prefix: [] },
+      ]
+
+  for (const candidate of candidates) {
+    try {
+      await run(candidate.cmd, [...candidate.prefix, '--version'], () => {}, 20_000)
+      onLog(`找到 Python：${candidate.cmd} ${candidate.prefix.join(' ')}`.trim())
+      return candidate
+    } catch {
+      /* 试下一个 */
+    }
+  }
+  return undefined
+}
+
+/** 直接下载 uv 的独立二进制（不依赖系统 Python）。 */
+async function downloadUvStandalone(onLog = () => {}) {
+  const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+  const file = IS_WIN
+    ? `uv-${arch}-pc-windows-msvc.zip`
+    : `uv-${arch}-apple-darwin.tar.gz`
+  const mirrors = [
+    `https://github.com/astral-sh/uv/releases/latest/download/${file}`,
+    `https://ghproxy.net/https://github.com/astral-sh/uv/releases/latest/download/${file}`,
+  ]
+  const target = path.join(HOME, '.local', file)
+  fs.mkdirSync(path.join(HOME, '.local'), { recursive: true })
+
+  let lastError
+  for (const url of mirrors) {
+    try {
+      onLog(`下载 uv：${url}`)
+      const response = await fetch(url, { redirect: 'follow' })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      fs.writeFileSync(target, Buffer.from(await response.arrayBuffer()))
+      lastError = undefined
+      break
+    } catch (error) {
+      lastError = error
+    }
+  }
+  if (lastError) throw lastError
+
+  if (IS_WIN) {
+    await run('powershell', [
+      '-NoProfile',
+      '-Command',
+      `Expand-Archive -Force -Path '${target}' -DestinationPath '${UV_DIR}'`,
+    ], onLog)
+  } else {
+    await run('tar', ['-xzf', target, '-C', UV_DIR, '--strip-components=1'], onLog)
+    fs.chmodSync(UV, 0o755)
+  }
+  fs.rmSync(target, { force: true })
 }
 
 /** 当前环境是否可用。 */
@@ -118,15 +185,22 @@ async function install(onLog = () => {}) {
   const current = status()
   if (current.ready) return { ...current, skipped: true }
 
-  const python = systemPython()
-  if (!python) throw new Error('找不到系统 python3，无法开始安装')
-
-  // 1. uv：用系统 python 装到用户目录，不需要 sudo
-  if (!fs.existsSync(UV)) {
-    onLog('① 安装 uv（Python 工具链管理器）…')
-    await run(python, ['-m', 'pip', 'install', '--user', '--upgrade', '--quiet', 'uv'], onLog)
-  } else {
+  // 1. uv：有系统 Python 就走 pip，没有就下独立二进制
+  if (fs.existsSync(UV)) {
     onLog('① uv 已存在，跳过')
+  } else {
+    onLog('① 安装 uv（Python 工具链管理器）…')
+    const python = await detectPython(onLog)
+    if (python) {
+      try {
+        await run(python.cmd, [...python.prefix, '-m', 'pip', 'install', '--user', '--upgrade', '--quiet', 'uv'], onLog)
+      } catch (error) {
+        onLog(`pip 安装失败（${error.message}），改用独立二进制`)
+      }
+    } else {
+      onLog('系统没有可用的 Python，改为直接下载 uv')
+    }
+    if (!fs.existsSync(UV)) await downloadUvStandalone(onLog)
   }
   if (!fs.existsSync(UV)) throw new Error('uv 安装失败')
 
@@ -153,4 +227,4 @@ async function install(onLog = () => {}) {
   return status()
 }
 
-module.exports = { status, install, VENV_PYTHON, UV, BACKEND }
+module.exports = { status, install, VENV_PYTHON, UV, BACKEND, detectPython }

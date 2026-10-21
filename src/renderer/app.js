@@ -40,6 +40,7 @@ const el = {
   envBlock: document.getElementById('envBlock'),
   installEnv: document.getElementById('installEnv'),
   envLog: document.getElementById('envLog'),
+  envSize: document.getElementById('envSize'),
   bar: document.getElementById('bar'),
   barFill: document.getElementById('barFill'),
   dlText: document.getElementById('dlText'),
@@ -646,6 +647,11 @@ async function init() {
 
   const env = state.probe.environment
   const envMissing = env !== undefined && env.ready === false
+  // 两个后端的依赖体积差很多，别让 Windows 用户以为只下 300MB
+  el.envSize.textContent =
+    state.probe.backend === 'torch'
+      ? 'Python + torch，约 900 MB'
+      : 'Python + mlx-audio，约 300 MB'
   el.envBlock.classList.toggle('hidden', !envMissing)
 
   const missing = options.length > 0 && !installed.includes(el.model.value)
