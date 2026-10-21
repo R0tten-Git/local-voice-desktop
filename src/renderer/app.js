@@ -10,7 +10,11 @@ const LIVE = {
   sampleRate: 16000,
   silenceMs: 950,
   minSpeechMs: 400,
-  maxChunkMs: 9000,
+  /** 硬上限（兜底，正常情况下用不到） */
+  maxChunkMs: 20000,
+  /** 一段超过这么久之后，遇到 350ms 的短停顿就切（逗号级停顿，不会劈开词组） */
+  midCutAfterMs: 12000,
+  midSilenceMs: 350,
   calibrateMs: 1200,
   /** 阈值下限：防数字静音误触发，但别设太高（实测底噪 0.0005 时 0.008 会吃掉小声） */
   /** 句首回卷：触发时把前面这段也带上，避免切掉第一个字或被重复解码 */
@@ -240,8 +244,15 @@ async function openMicrophone(onChunk) {
       vad.silenceMs += ms
     }
 
-    if (vad.silenceMs >= LIVE.silenceMs && vad.voicedMs >= LIVE.minSpeechMs) flush()
-    else if (vad.chunkMs >= LIVE.maxChunkMs) flush()
+    const longEnough = vad.voicedMs >= LIVE.minSpeechMs
+    if (vad.silenceMs >= LIVE.silenceMs && longEnough) {
+      flush()
+    } else if (vad.chunkMs >= LIVE.midCutAfterMs && vad.silenceMs >= LIVE.midSilenceMs && longEnough) {
+      // 话说得太长：趁一个换气的短停顿切，别切在词组中间
+      flush()
+    } else if (vad.chunkMs >= LIVE.maxChunkMs) {
+      flush()
+    }
   }
 
   return {
@@ -281,6 +292,26 @@ function transcribe(samples) {
     })
 }
 
+/**
+ * 明显"话没说完"的句尾。命中就把下一段接上——用来兜住"切早了"的残留。
+ * 比 DSH 插件版多收了 在/因/而/使/让/从/向/将 这些单字介词，
+ * 它们在中文里几乎不会结束一句话。
+ */
+const FRAGMENT_TAIL = /(以及|或者|还是|就是|不会|不能|不是|而且|并且|但是|因为|所以|如果|虽然|在|因|而|使|让|从|向|将|由|把|被|对|给|和|跟|与)$/u
+const LEADING_FILLER = /^[呃嗯啊唉额哦噢呀哈]+[，,、。.\s]*/u
+
+/**
+ * 判断两段是不是同一句被切断的。
+ * @returns 拼好的文本；不该合并时返回 undefined。
+ */
+function mergeFragment(previous, next) {
+  const tail = previous.replace(/[。．.！!？?，,；;：:\s]+$/u, '')
+  if (!FRAGMENT_TAIL.test(tail)) return undefined
+  const head = next.replace(LEADING_FILLER, '').trim()
+  if (!head) return undefined
+  return `${tail}${head}`
+}
+
 /** 去掉句首的语气词：「嗯，现在是。」→「现在是。」 */
 function trimLeadingFiller(text) {
   const stripped = text.replace(/^[嗯啊呃哦噢呀哈额]+[，,、。\s]*/u, '').trim()
@@ -289,11 +320,24 @@ function trimLeadingFiller(text) {
 
 function appendLine(text) {
   text = trimLeadingFiller(text)
+  const last = state.lines[state.lines.length - 1]
+  if (last !== undefined) {
+    const merged = mergeFragment(last.text, text)
+    if (merged !== undefined) {
+      // 同一句被切开：接回上一行，时间戳保持不变
+      last.text = merged
+      const body = el.transcript.querySelector(`[data-id="${last.id}"] span`)
+      if (body) body.textContent = merged
+      render()
+      return
+    }
+  }
   state.lines.push({ id: `${Date.now()}-${Math.random()}`, ts: clock(new Date()), text })
   const previous = el.transcript.querySelector('.placeholder')
   if (previous) previous.remove()
   const node = document.createElement('div')
   node.className = 'line'
+  node.dataset.id = state.lines[state.lines.length - 1].id
   const time = document.createElement('time')
   time.textContent = state.lines[state.lines.length - 1].ts
   const body = document.createElement('span')
