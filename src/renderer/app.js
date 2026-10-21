@@ -265,7 +265,14 @@ function transcribe(samples) {
     })
 }
 
+/** 去掉句首的语气词：「嗯，现在是。」→「现在是。」 */
+function trimLeadingFiller(text) {
+  const stripped = text.replace(/^[嗯啊呃哦噢呀哈额]+[，,、。\s]*/u, '').trim()
+  return stripped.length > 0 ? stripped : text
+}
+
 function appendLine(text) {
+  text = trimLeadingFiller(text)
   state.lines.push({ id: `${Date.now()}-${Math.random()}`, ts: clock(new Date()), text })
   const previous = el.transcript.querySelector('.placeholder')
   if (previous) previous.remove()

@@ -45,7 +45,14 @@ body {
 body.platform-darwin .titlebar { padding-left: 80px; }
 
 .brand { font-weight: 650; letter-spacing: 0.01em; }
-.sub { color: var(--muted); font-size: 12px; }
+.sub {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
 .spacer { flex: 1 1 auto; }
 
 select {
@@ -56,7 +63,15 @@ select {
   padding: 4px 8px;
   font: inherit;
   font-size: 12px;
-  max-width: 260px;
+  max-width: 46%;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+/* 系统强调色（你是橙色）给的默认轮廓太抢眼，换成柔和的品牌色 */
+select:focus { outline: none; }
+select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
 }
 
 .transcript {
