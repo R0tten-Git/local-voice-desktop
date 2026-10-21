@@ -180,19 +180,18 @@ async function openMicrophone(onChunk, onPartial, onError) {
   source.connect(processor)
   processor.connect(audio.destination)
 
-  // 看门狗：3 秒内一帧都没收到，几乎肯定是权限或设备问题，直接报错而不是干等
+  // 看门狗：6 秒内一帧都没收到才算异常。3 秒太激进——蓝牙耳机、刚插上的
+  // USB 麦克风、系统切设备时都可能在 3 秒后才开始出数据，会误报。
   let framesSeen = 0
   const watchdog = setInterval(() => {
-    if (framesSeen > 0) return
+    if (framesSeen > 0) {
+      clearInterval(watchdog)
+      return
+    }
+    if (audio.state === 'running') return // 上下文在跑，再给一点时间
     clearInterval(watchdog)
-    onError?.(
-      new Error(
-        audio.state === 'suspended'
-          ? '音频上下文处于挂起状态，没收到麦克风数据'
-          : '没有收到麦克风音频，请检查系统设置里的麦克风权限，或换一个输入设备',
-      ),
-    )
-  }, 3000)
+    onError?.(new Error('音频上下文没有启动，没收到麦克风数据'))
+  }, 6000)
 
   /** 最近若干帧的环形缓冲，只在"没在说话"时维护 */
   const preroll = []
@@ -504,13 +503,16 @@ async function start() {
       (samples) => transcribe(samples),
       (samples) => transcribePartial(samples),
       (error) => {
-        state.session?.stop()
-        state.session = undefined
-        clearInterval(state.timer)
-        state.timer = undefined
-        state.phase = 'idle'
+        if (error === null) {
+          // 音频恢复了：清掉提示，别让误报一直挂着
+          if (state.notice !== '') {
+            state.notice = ''
+            if (state.phase === 'recording') render()
+          }
+          return
+        }
         state.notice = `麦克风不可用：${error.message}`
-        render()
+        if (state.phase !== 'recording') render()
       },
     )
     state.audioInfo = `${state.session.label} · ${state.session.sampleRate}Hz`
@@ -572,16 +574,18 @@ function render() {
     el.state.classList.remove('live')
     // 暂停后必须改写这行，否则会一直挂着"录音中"
     el.state.textContent =
-      state.notice ||
-      (state.lines.length > 0 ? `已暂停 ${elapsedText(state.accumulated)}` : '就绪')
+      state.lines.length > 0 ? `已暂停 ${elapsedText(state.accumulated)}` : '就绪'
   }
 
   const chars = state.lines.reduce((sum, line) => sum + line.text.length, 0)
   el.stats.textContent = `${chars} 字 · ${state.lines.length} 句${state.pending > 0 ? ` · 识别中 ${state.pending}` : ''}`
+  const notice = state.notice !== '' ? ` · ${state.notice}` : ''
   el.diag.textContent =
     `电平 ${state.level.toFixed(4)} · 峰值 ${state.peak.toFixed(4)} · ` +
     `阈值 ${state.threshold > 0 ? state.threshold.toFixed(4) : '校准中'}` +
-    (state.audioInfo ? ` · ${state.audioInfo}` : '')
+    (state.audioInfo ? ` · ${state.audioInfo}` : '') +
+    notice
+  el.diag.classList.toggle('warn', notice !== '')
 
   for (const button of [el.copy, el.save, el.clear]) button.disabled = state.lines.length === 0
 }
