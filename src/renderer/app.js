@@ -10,8 +10,11 @@ const LIVE = {
   sampleRate: 16000,
   silenceMs: 950,
   minSpeechMs: 400,
-  /** 硬上限（兜底，正常情况下用不到） */
-  maxChunkMs: 12000,
+  /**
+   * 硬上限。连续说话时靠它兜底，切得越碎越容易切在句子中间。
+   * 实时感由"临时结果"负责，所以这里可以放宽。
+   */
+  maxChunkMs: 20000,
   /** 一段超过这么久之后，遇到 350ms 的短停顿就切（逗号级停顿，不会劈开词组） */
   midCutAfterMs: 5000,
   midSilenceMs: 350,
@@ -392,7 +395,7 @@ function transcribe(samples) {
       }
       const text = (result.text ?? '').trim()
       clearPartial()
-      if (text) appendLine(text)
+      if (text) appendLine(text, result.audioSeconds)
     })
     .catch((error) => {
       appendMessage(`识别失败：${error.message ?? error}`)
@@ -440,7 +443,11 @@ function splitSentences(text) {
   return parts.length > 0 ? parts : [text]
 }
 
-function appendLine(text) {
+/**
+ * 上屏。audioSeconds 是这段音频的长度，用来把时间戳按字数分摊到每句上，
+ * 否则一段拆出来的几行会显示同一个时间，看起来像批量输出。
+ */
+function appendLine(text, audioSeconds) {
   text = trimLeadingFiller(text)
   const sentences = splitSentences(text)
   if (sentences.length === 0) return
@@ -459,13 +466,22 @@ function appendLine(text) {
     }
   }
 
-  for (const sentence of sentences) pushLine(sentence)
+  const totalChars = sentences.reduce((sum, item) => sum + item.length, 0) || 1
+  const endAt = Date.now()
+  const spanMs = Math.max(0, (audioSeconds ?? 0) * 1000)
+  const startAt = endAt - spanMs
+  let consumed = 0
+  for (const sentence of sentences) {
+    consumed += sentence.length / totalChars
+    const at = new Date(startAt + spanMs * consumed)
+    pushLine(sentence, clock(at))
+  }
   render()
 }
 
 /** 真正往界面里加一行。 */
-function pushLine(text) {
-  state.lines.push({ id: `${Date.now()}-${Math.random()}`, ts: clock(new Date()), text })
+function pushLine(text, ts) {
+  state.lines.push({ id: `${Date.now()}-${Math.random()}`, ts: ts ?? clock(new Date()), text })
   const previous = el.transcript.querySelector('.placeholder')
   if (previous) previous.remove()
   const node = document.createElement('div')
