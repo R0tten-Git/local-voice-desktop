@@ -158,7 +158,10 @@ async function openMicrophone(onChunk, onPartial, onError) {
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
   const AudioCtor = window.AudioContext ?? window.webkitAudioContext
-  const audio = new AudioCtor({ sampleRate: LIVE.sampleRate })
+  // 不要强求 16000：部分 Windows 声卡不支持任意采样率，上下文会一直 suspended，
+  // onaudioprocess 永远不触发（表现为权限正常但电平恒为 0）。
+  // 用设备原生采样率，后面的 resampleTo16k 会转成 16k。
+  const audio = new AudioCtor()
   // 有些平台（尤其 Windows）创建后是 suspended，不 resume 就永远收不到帧，
   // 表现就是阈值一直停在"校准中"。
   if (audio.state !== 'running') {
@@ -311,7 +314,11 @@ async function openMicrophone(onChunk, onPartial, onError) {
     }
   }
 
+  const track = stream.getAudioTracks()[0]
   return {
+    label: track?.label || '默认输入设备',
+    sampleRate: audio.sampleRate,
+    state: audio.state,
     stop() {
       processor.onaudioprocess = null
       try {
@@ -498,6 +505,7 @@ async function start() {
         render()
       },
     )
+    state.audioInfo = `${state.session.label} · ${state.session.sampleRate}Hz`
     state.phase = 'recording'
     state.startedAt = Date.now()
     state.timer = setInterval(render, 500)
@@ -564,7 +572,8 @@ function render() {
   el.stats.textContent = `${chars} 字 · ${state.lines.length} 句${state.pending > 0 ? ` · 识别中 ${state.pending}` : ''}`
   el.diag.textContent =
     `电平 ${state.level.toFixed(4)} · 峰值 ${state.peak.toFixed(4)} · ` +
-    `阈值 ${state.threshold > 0 ? state.threshold.toFixed(4) : '校准中'}`
+    `阈值 ${state.threshold > 0 ? state.threshold.toFixed(4) : '校准中'}` +
+    (state.audioInfo ? ` · ${state.audioInfo}` : '')
 
   for (const button of [el.copy, el.save, el.clear]) button.disabled = state.lines.length === 0
 }
