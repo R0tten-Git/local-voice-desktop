@@ -159,6 +159,8 @@ async function openMicrophone(onChunk) {
 
   const vad = {
     threshold: null,
+    /** 强制切分后的冷却截止时间：这期间触发不带回卷，否则会把切开的尾巴重复识别 */
+    prerollMuteUntil: 0,
     noiseFloor: 0,
     trackedMs: 0,
     calibrating: [],
@@ -227,7 +229,9 @@ async function openMicrophone(onChunk) {
         return
       }
       vad.speaking = true
-      vad.frames = [...preroll, block]
+      // 刚被强制切过：不要回卷，否则上一段的尾巴会被重新识别一遍
+      const carry = Date.now() >= vad.prerollMuteUntil ? [...preroll] : []
+      vad.frames = [...carry, block]
       vad.voicedMs = ms
       vad.silenceMs = 0
       vad.chunkMs = ms
@@ -249,8 +253,10 @@ async function openMicrophone(onChunk) {
       flush()
     } else if (vad.chunkMs >= LIVE.midCutAfterMs && vad.silenceMs >= LIVE.midSilenceMs && longEnough) {
       // 话说得太长：趁一个换气的短停顿切，别切在词组中间
+      vad.prerollMuteUntil = Date.now() + 600
       flush()
     } else if (vad.chunkMs >= LIVE.maxChunkMs) {
+      vad.prerollMuteUntil = Date.now() + 600
       flush()
     }
   }
@@ -318,20 +324,42 @@ function trimLeadingFiller(text) {
   return stripped.length > 0 ? stripped : text
 }
 
+/**
+ * 把一段转写按句号/问号/感叹号拆成多行。
+ *
+ * 连续说话（视频、讲座、开会）时 VAD 等不到长静音，一个音频块可能有 20 秒、
+ * 好几句话。模型自己的标点就是现成的句子边界，用它拆行比在音频上硬切更准。
+ */
+function splitSentences(text) {
+  const parts = text.split(/(?<=[。！？!?])/u).map((part) => part.trim()).filter(Boolean)
+  return parts.length > 0 ? parts : [text]
+}
+
 function appendLine(text) {
   text = trimLeadingFiller(text)
+  const sentences = splitSentences(text)
+  if (sentences.length === 0) return
+
+  // 先拿第一句去和上一行尝试接力，避免"…九点半睡。" + "睡觉。" 这种断裂
+  const head = sentences[0]
   const last = state.lines[state.lines.length - 1]
   if (last !== undefined) {
-    const merged = mergeFragment(last.text, text)
+    const merged = mergeFragment(last.text, head)
     if (merged !== undefined) {
-      // 同一句被切开：接回上一行，时间戳保持不变
       last.text = merged
       const body = el.transcript.querySelector(`[data-id="${last.id}"] span`)
       if (body) body.textContent = merged
+      sentences.shift()
       render()
-      return
     }
   }
+
+  for (const sentence of sentences) pushLine(sentence)
+  render()
+}
+
+/** 真正往界面里加一行。 */
+function pushLine(text) {
   state.lines.push({ id: `${Date.now()}-${Math.random()}`, ts: clock(new Date()), text })
   const previous = el.transcript.querySelector('.placeholder')
   if (previous) previous.remove()
