@@ -389,9 +389,20 @@ function transcribe(samples) {
     .then(async () => {
       const wav = encodeWav(samples, LIVE.sampleRate)
       const result = await api.transcribe(toBase64(wav), 'auto')
-      // CPU 推理慢：把临时结果的频率降下来，把算力留给定稿
-      if ((result.inferenceSeconds ?? 0) * 1000 > LIVE.slowInferenceMs) {
-        state.partialEveryMs = LIVE.partialEverySlowMs
+      // 按最近几次推理的平均耗时调整临时稿频率。
+      // 注意必须双向：之前写成了单向降频，一次预热就能把间隔永久锁在 5 秒。
+      const costMs = Math.round((result.inferenceSeconds ?? 0) * 1000)
+      state.lastInferenceMs = costMs
+      if (costMs > 0) {
+        state.inferenceSamples.push(costMs)
+        if (state.inferenceSamples.length > 4) state.inferenceSamples.shift()
+        const average =
+          state.inferenceSamples.reduce((sum, value) => sum + value, 0) /
+          state.inferenceSamples.length
+        state.partialEveryMs = Math.min(
+          LIVE.partialEverySlowMs,
+          Math.max(LIVE.partialEveryMs, Math.round(average * 1.5)),
+        )
       }
       const text = (result.text ?? '').trim()
       clearPartial()
@@ -600,6 +611,7 @@ function render() {
     `电平 ${state.level.toFixed(4)} · 峰值 ${state.peak.toFixed(4)} · ` +
     `阈值 ${state.threshold > 0 ? state.threshold.toFixed(4) : '校准中'}` +
     (state.audioInfo ? ` · ${state.audioInfo}` : '') +
+    (state.lastInferenceMs > 0 ? ` · 推理 ${state.lastInferenceMs}ms` : '') +
     notice
   el.diag.classList.toggle('warn', notice !== '')
 
