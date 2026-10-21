@@ -20,7 +20,10 @@ const VENV = process.env.LOCAL_VOICE_VENV ?? path.join(HOME, '.local/venvs/mlx-a
 const VENV_PYTHON = IS_WIN
   ? path.join(VENV, 'Scripts/python.exe')
   : path.join(VENV, 'bin/python')
-const UV = path.join(HOME, '.local/bin', IS_WIN ? 'uv.exe' : 'uv')
+const UV_NAME = IS_WIN ? 'uv.exe' : 'uv'
+/** 优先用安装包里自带的 uv（用户不用下载、也不依赖网络） */
+const BUNDLED_UV = path.join(process.resourcesPath ?? '', 'uv', UV_NAME)
+const UV = fs.existsSync(BUNDLED_UV) ? BUNDLED_UV : path.join(HOME, '.local/bin', UV_NAME)
 const UV_DIR = path.join(HOME, '.local/bin')
 
 /** 两个后端的依赖完全不同：MLX 只认 Apple Silicon，torch 全平台通用。 */
@@ -75,9 +78,10 @@ async function downloadUvStandalone(onLog = () => {}) {
   const file = IS_WIN
     ? `uv-${arch}-pc-windows-msvc.zip`
     : `uv-${arch}-apple-darwin.tar.gz`
+  // ghproxy.net 实测会 302 后挂住，换成 gh-proxy.com
   const mirrors = [
     `https://github.com/astral-sh/uv/releases/latest/download/${file}`,
-    `https://ghproxy.net/https://github.com/astral-sh/uv/releases/latest/download/${file}`,
+    `https://gh-proxy.com/https://github.com/astral-sh/uv/releases/latest/download/${file}`,
   ]
   const target = path.join(HOME, '.local', file)
   fs.mkdirSync(path.join(HOME, '.local'), { recursive: true })
@@ -86,7 +90,10 @@ async function downloadUvStandalone(onLog = () => {}) {
   for (const url of mirrors) {
     try {
       onLog(`下载 uv：${url}`)
-      const response = await fetch(url, { redirect: 'follow' })
+      const response = await fetch(url, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(120_000),
+      })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       fs.writeFileSync(target, Buffer.from(await response.arrayBuffer()))
       lastError = undefined
@@ -113,7 +120,7 @@ async function downloadUvStandalone(onLog = () => {}) {
 /** 当前环境是否可用。 */
 function status() {
   if (!fs.existsSync(VENV_PYTHON)) {
-    return { ready: false, reason: 'missing-venv', python: VENV_PYTHON }
+    return { ready: false, reason: 'missing-venv', python: VENV_PYTHON, venv: VENV }
   }
   try {
     const { spawnSync } = require('node:child_process')
@@ -121,15 +128,16 @@ function status() {
       timeout: 60_000,
       encoding: 'utf8',
     })
-    if (probe.status === 0) return { ready: true, python: VENV_PYTHON }
+    if (probe.status === 0) return { ready: true, python: VENV_PYTHON, venv: VENV }
     return {
       ready: false,
       reason: 'missing-packages',
       python: VENV_PYTHON,
+      venv: VENV,
       detail: (probe.stderr || '').trim().split('\n').pop(),
     }
   } catch (error) {
-    return { ready: false, reason: 'probe-failed', python: VENV_PYTHON, detail: String(error) }
+    return { ready: false, reason: 'probe-failed', python: VENV_PYTHON, venv: VENV, detail: String(error) }
   }
 }
 

@@ -41,6 +41,7 @@ const el = {
   installEnv: document.getElementById('installEnv'),
   envLog: document.getElementById('envLog'),
   envSize: document.getElementById('envSize'),
+  envPath: document.getElementById('envPath'),
   bar: document.getElementById('bar'),
   barFill: document.getElementById('barFill'),
   dlText: document.getElementById('dlText'),
@@ -652,6 +653,7 @@ async function init() {
     state.probe.backend === 'torch'
       ? 'Python + torch，约 900 MB'
       : 'Python + mlx-audio，约 300 MB'
+  if (env?.venv) el.envPath.textContent = env.venv
   el.envBlock.classList.toggle('hidden', !envMissing)
 
   const missing = options.length > 0 && !installed.includes(el.model.value)

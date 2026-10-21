@@ -43,6 +43,9 @@ jobs:
           done
           python -m py_compile engine/worker.py engine/worker_torch.py
 
+      - name: Bundle uv
+        run: node scripts/fetch-uv.mjs
+
       - name: Package
         run: npm run ${{ matrix.script }}
         env:

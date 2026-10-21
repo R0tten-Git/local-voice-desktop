@@ -7,3 +7,4 @@ release/
 __pycache__/
 *.py[cod]
 models/
+vendor/
