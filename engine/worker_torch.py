@@ -55,6 +55,23 @@ def log(msg: str) -> None:
     print(f"[qwen3-torch-worker] {msg}", file=sys.stderr, flush=True)
 
 
+HOTWORD_DUMP = "、".join(HOTWORDS)
+
+
+def strip_hotword_dump(text: str) -> str:
+    """去掉模型复述出来的热词表。"""
+    if not text:
+        return text
+    if HOTWORD_DUMP in text:
+        text = text.replace(HOTWORD_DUMP, "")
+    # 也处理部分复述：连续出现 6 个以上热词就认为是在念词表
+    hits = sum(1 for word in HOTWORDS if word in text)
+    if hits >= 6:
+        for word in HOTWORDS:
+            text = text.replace(f"{word}、", "").replace(word, "")
+    return text.strip()
+
+
 def clean_text(text: str) -> str:
     """去掉模型回显的对话模板痕迹。"""
     text = (text or "").strip()
@@ -65,6 +82,7 @@ def clean_text(text: str) -> str:
         text = text.split("assistant", 1)[1]
     for marker in ("system", "<|im_start|>", "<|im_end|>", "user"):
         text = text.replace(marker, "")
+    text = strip_hotword_dump(text)
     return text.strip()
 
 
@@ -127,6 +145,11 @@ def main() -> int:
     from transformers import Qwen3ASRForConditionalGeneration, Qwen3ASRProcessor
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu":
+        # 默认线程数在 Windows 上常常只给一半，显式用满
+        threads = os.cpu_count() or 4
+        torch.set_num_threads(threads)
+        log(f"CPU 线程数 {threads}")
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
     log(f"设备 {device} · dtype {dtype}")
 
@@ -135,8 +158,10 @@ def main() -> int:
     model.to(device)
     model.eval()
 
-    # 领域词表折进 system prompt，和 MLX 版保持同样的偏置
-    prompt = "、".join(HOTWORDS)
+    # 这里刻意不传 prompt（热词表）：0.6B 这类小模型会把 system prompt
+    # 当成待转写内容原样吐出来，用户会看到"调优、转写、实时转写…"整行。
+    # MLX 后端用的是解码期偏置，没有这个问题。
+    prompt = None
 
     load_ms = int((time.time() - t0) * 1000)
     sys.stdout = proto

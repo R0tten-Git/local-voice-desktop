@@ -17,6 +17,10 @@ const LIVE = {
   midSilenceMs: 350,
   /** 边说边出的临时结果：每隔这么久把当前缓冲送一次识别 */
   partialEveryMs: 2200,
+  /** 推理慢的机器（CPU）自动放宽到这个间隔，否则临时结果会占满算力 */
+  partialEverySlowMs: 5000,
+  /** 单次推理超过这个时间就算"慢机器" */
+  slowInferenceMs: 1200,
   /** 临时结果最多用多长的音频（越长越慢，10 秒够覆盖一句话） */
   partialWindowMs: 10000,
   /** 至少要说这么久才值得送一次临时结果 */
@@ -292,7 +296,7 @@ async function openMicrophone(onChunk, onPartial, onError) {
     if (
       onPartial !== undefined &&
       vad.chunkMs >= LIVE.partialMinMs &&
-      now - vad.lastPartialAt >= LIVE.partialEveryMs
+      now - vad.lastPartialAt >= state.partialEveryMs
     ) {
       vad.lastPartialAt = now
       const windowFrames = Math.min(
@@ -383,6 +387,10 @@ function transcribe(samples) {
     .then(async () => {
       const wav = encodeWav(samples, LIVE.sampleRate)
       const result = await api.transcribe(toBase64(wav), 'auto')
+      // CPU 推理慢：把临时结果的频率降下来，把算力留给定稿
+      if ((result.inferenceSeconds ?? 0) * 1000 > LIVE.slowInferenceMs) {
+        state.partialEveryMs = LIVE.partialEverySlowMs
+      }
       const text = (result.text ?? '').trim()
       clearPartial()
       if (text) appendLine(text)
