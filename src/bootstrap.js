@@ -31,7 +31,22 @@ const UV_DIR = path.join(HOME, '.local/bin')
  * 依赖从国内 PyPI 镜像拉。官方 pypi.org 在国内经常几十 KB/s，
  * 清华镜像实测快一个数量级，且完整同步 PyPI。
  */
-const PYPI_MIRROR = process.env.LOCAL_VOICE_PYPI ?? 'https://pypi.tuna.tsinghua.edu.cn/simple'
+/**
+ * 国内 PyPI 镜像，按顺序回退。
+ *
+ * 清华会按 IP 限流，表现为个别 wheel 返回 403（"Failed to unzip wheel"），
+ * 所以一个失败就换下一个，而不是让用户卡在那里。
+ */
+const PYPI_MIRRORS = process.env.LOCAL_VOICE_PYPI
+  ? [process.env.LOCAL_VOICE_PYPI]
+  : [
+      'https://mirrors.aliyun.com/pypi/simple',
+      'https://pypi.tuna.tsinghua.edu.cn/simple',
+      'https://mirrors.cloud.tencent.com/pypi/simple',
+      'https://mirrors.ustc.edu.cn/pypi/simple',
+      'https://mirrors.bfsu.edu.cn/pypi/web/simple',
+      'https://pypi.org/simple',
+    ]
 
 /** Python 本体来自 python-build-standalone（GitHub），备用走代理。 */
 const PYTHON_MIRROR =
@@ -251,16 +266,31 @@ async function install(onLog = () => {}) {
 
   // 4. 依赖（约 300MB）
   onLog(`④ 安装依赖：${PACKAGES.join(' ')}（约 ${BACKEND === 'mlx' ? 300 : 900}MB，几分钟）…`)
-  onLog(`依赖源：${PYPI_MIRROR}`)
-  await run(
-    UV,
-    ['pip', 'install', '--python', VENV_PYTHON, '--index-url', PYPI_MIRROR, ...PACKAGES],
-    onLog,
-  )
+  let installed = false
+  let lastError
+  for (const mirror of PYPI_MIRRORS) {
+    onLog(`依赖源：${mirror}`)
+    try {
+      await run(
+        UV,
+        ['pip', 'install', '--python', VENV_PYTHON, '--index-url', mirror, ...PACKAGES],
+        onLog,
+      )
+      installed = true
+      break
+    } catch (error) {
+      lastError = error
+      onLog(`× 该源失败（${error.message}），换下一个镜像`)
+    }
+  }
+  if (!installed) {
+    throw new Error(`所有镜像都失败了：${lastError?.message ?? '未知错误'}`)
+  }
 
   if (BACKEND === 'torch' && (await hasNvidia().catch(() => false))) {
     onLog('提示：检测到 NVIDIA 显卡，当前装的是 CPU 版 torch')
-    onLog(`  想用 GPU 加速可执行：${UV} pip install --python "${VENV_PYTHON}" --force-reinstall --index-url https://download.pytorch.org/whl/cu124 torch`)
+    onLog('  想用 GPU 加速（2.5GB，阿里云镜像）：')
+    onLog(`  ${UV} pip install --python "${VENV_PYTHON}" --force-reinstall "https://mirrors.aliyun.com/pytorch-wheels/cu124/torch-2.6.0%2Bcu124-cp312-cp312-win_amd64.whl"`)
   }
 
   onLog('⑤ 校验…')
