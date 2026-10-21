@@ -264,6 +264,7 @@ app.whenReady().then(() => {
                   bar.style.height = (3 + Math.min(19, Math.sqrt(shape[index % shape.length] / 0.05) * 19)).toFixed(1) + 'px'
                 })
                 for (const id of ['copy', 'save', 'clear']) document.getElementById(id).disabled = false
+
                 return host.children.length
               })()
             `)

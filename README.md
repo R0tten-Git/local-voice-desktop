@@ -1,6 +1,6 @@
 # LocalVoice
 
-本机实时语音转写：点一下开始说话，说完一句停一下，就出一行字。**音频不出机器**，不需要账号，不需要联网。
+本机实时语音转写：按下开始，边说边出字。**音频不出机器**，不需要账号，不需要联网。
 
 > 这是独立桌面应用（Electron），与 DSH 插件版是两套东西：
 > 插件版见 [dsh-plugin-local-voice](https://github.com/R0tten-Git/dsh-plugin-local-voice)。

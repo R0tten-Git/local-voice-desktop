@@ -180,8 +180,8 @@ const EMPTY_STATE = `
         <path d="M12 18v3" />
       </svg>
     </div>
-    <p class="ph-title">按左下角开始说话</p>
-    <p class="ph-hint">一句说完稍停，这里就会落一行字 · 全程本地处理</p>
+    <p class="ph-title">按下开始，边听边写</p>
+    <p class="ph-hint">文字会实时出现在这里 · 音频不出本机</p>
   </div>`
 
 function showEmptyState() {
