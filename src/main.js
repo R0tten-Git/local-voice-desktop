@@ -141,7 +141,7 @@ function createTray() {
 }
 
 function showWindow() {
-  if (!window) {
+  if (!window || window.isDestroyed()) {
     createWindow()
     return
   }
@@ -193,7 +193,19 @@ function createWindow() {
     },
   })
   window.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  // 主窗口收起时用悬浮小球接管"还在录音"的反馈。
+  // 必须绑在 createWindow 里：关掉窗口再打开会得到一个新对象，
+  // 之前绑在旧对象上的监听不会自动迁移。
+  window.on('minimize', () => {
+    if (status.phase === 'recording' || status.phase === 'paused') showFloat()
+  })
+  window.on('hide', () => {
+    if (status.phase === 'recording' || status.phase === 'paused') showFloat()
+  })
+  window.on('restore', () => hideFloat())
+  window.on('show', () => hideFloat())
   window.on('closed', () => {
+    hideFloat()
     window = undefined
   })
 }
@@ -281,19 +293,8 @@ app.whenReady().then(() => {
     })
   }
 
-  // 主窗口收起时用悬浮小球接管"Yes 还在录音"的反馈
-  window.on('minimize', () => {
-    if (status.phase === 'recording' || status.phase === 'paused') showFloat()
-  })
-  window.on('restore', () => hideFloat())
-  window.on('hide', () => {
-    if (status.phase === 'recording' || status.phase === 'paused') showFloat()
-  })
-  window.on('show', () => hideFloat())
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+  // 点击程序坞图标时无论如何都把窗口带回来（包括最小化状态，以及窗口已被关闭）
+  app.on('activate', () => showWindow())
 })
 
 app.on('window-all-closed', () => {
