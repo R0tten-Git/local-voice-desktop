@@ -21,6 +21,13 @@ contextBridge.exposeInMainWorld('localVoice', {
     ipcRenderer.on('model:progress', listener)
     return () => ipcRenderer.removeListener('model:progress', listener)
   },
+  reportStatus: (status) => ipcRenderer.send('status:update', status),
+  onCommand: (callback) => {
+    const listener = (_event, command) => callback(command)
+    ipcRenderer.on('command:show', listener)
+    ipcRenderer.on('command:toggle', listener)
+    return () => ipcRenderer.removeListener('command:toggle', listener)
+  },
   openModelsFolder: () => ipcRenderer.invoke('app:openModelsFolder'),
   saveMarkdown: (text, suggestedName) => ipcRenderer.invoke('app:saveMarkdown', { text, suggestedName }),
   copy: (text) => ipcRenderer.invoke('app:copy', text),

@@ -1,7 +1,7 @@
 /**
  * Electron 主进程：窗口、麦克风权限、引擎 IPC。
  */
-const { app, BrowserWindow, ipcMain, session, shell, dialog, clipboard } = require('electron')
+const { app, BrowserWindow, ipcMain, session, shell, dialog, clipboard, Tray, Menu, nativeImage } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -29,6 +29,74 @@ function logLine(line) {
 }
 
 const engine = new Engine(logLine)
+
+// ------------------------------------------------------------------ 菜单栏
+
+/** @type {Tray | undefined} */
+let tray
+/** 最近一次上报的状态，菜单栏和菜单文案都靠它 */
+let status = { phase: 'idle', elapsedMs: 0, chars: 0 }
+/** 菜单文案没变就不重建，否则每 500ms 重建一次菜单 */
+let lastMenuLabel = ''
+
+function statusText() {
+  const seconds = Math.floor(status.elapsedMs / 1000)
+  const mmss = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  if (status.phase === 'recording') return `● ${mmss}`
+  if (status.phase === 'paused') return `❚❚ ${mmss}`
+  return ''
+}
+
+function refreshTray() {
+  if (!tray) return
+  // macOS 直接把文字放在菜单栏；Windows 没有 setTitle，只能靠 tooltip 和菜单
+  if (process.platform === 'darwin') tray.setTitle(statusText())
+  const label =
+    status.phase === 'recording'
+      ? `录音中 ${statusText().replace('● ', '')} · ${status.chars} 字`
+      : status.phase === 'paused'
+        ? `已暂停 · ${status.chars} 字`
+        : '就绪'
+  tray.setToolTip(`LocalVoice — ${label}`)
+  if (label === lastMenuLabel) return
+  lastMenuLabel = label
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label, enabled: false },
+      { type: 'separator' },
+      { label: '显示窗口', click: () => showWindow() },
+      {
+        label: status.phase === 'recording' ? '暂停' : '开始 / 继续',
+        click: () => window?.webContents.send('command:toggle'),
+      },
+      { type: 'separator' },
+      { label: '退出 LocalVoice', click: () => app.quit() },
+    ]),
+  )
+}
+
+function createTray() {
+  const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'trayTemplate.png'))
+  icon.setTemplateImage(true)
+  tray = new Tray(icon)
+  tray.on('click', () => showWindow())
+  refreshTray()
+}
+
+function showWindow() {
+  if (!window) {
+    createWindow()
+    return
+  }
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+}
+
+ipcMain.on('status:update', (_event, next) => {
+  status = { ...status, ...next }
+  refreshTray()
+})
 
 /** 模型目录：默认 ~/models/<仓库名>。 */
 function modelDir(repo) {
@@ -76,6 +144,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_contents, permission) => permission === 'media')
 
   createWindow()
+  createTray()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -84,7 +153,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   engine.kill()
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin') {
+    tray?.destroy()
+    app.quit()
+  }
 })
 
 app.on('before-quit', () => engine.kill())

@@ -626,6 +626,13 @@ function render() {
   el.diag.classList.toggle('warn', notice !== '')
 
   for (const button of [el.copy, el.save, el.clear]) button.disabled = state.lines.length === 0
+
+  // 菜单栏显示录音状态与时长
+  const elapsed =
+    state.phase === 'recording'
+      ? state.accumulated + (Date.now() - state.startedAt)
+      : state.accumulated
+  api.reportStatus({ phase: state.phase, elapsedMs: elapsed, chars })
 }
 
 // ------------------------------------------------------------------ 初始化
@@ -798,6 +805,10 @@ el.model.addEventListener('change', async () => {
     el.barFill.style.width = '0%'
     el.dlText.textContent = ''
   }
+})
+
+api.onCommand((command) => {
+  if (command === 'command:toggle') toggle()
 })
 
 init().catch((error) => {
