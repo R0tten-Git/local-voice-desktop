@@ -57,6 +57,21 @@ npm run build:win    # 出 nsis 安装包（需在 Windows 或 CI 上跑）
 xattr -dr com.apple.quarantine /Applications/LocalVoice.app
 ```
 
+## 排障
+
+**启动后没有窗口，报 `Cannot read properties of undefined (reading 'whenReady')`**
+说明进程里带了 `ELECTRON_RUN_AS_NODE=1`，Electron 退化成了纯 Node：
+
+```bash
+env -u ELECTRON_RUN_AS_NODE npm run dev
+```
+
+**首次录音没有声音**
+macOS 会弹系统授权；如果误点了拒绝，去 系统设置 → 隐私与安全性 → 麦克风，把 LocalVoice 勾上。
+
+**一直不出字**
+界面上会显示实时电平：说话时应在 0.02 以上。一直是 0.00x 就是没采到声音（权限或设备）。
+
 ## 结构
 
 ```
