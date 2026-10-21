@@ -99,7 +99,12 @@ class Engine {
       this.log(`启动引擎：${python} ${script} ${modelPath}`)
       let child
       try {
-        child = spawn(python, [script, modelPath], { stdio: ['pipe', 'pipe', 'pipe'] })
+        child = spawn(python, [script, modelPath], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          // Windows 上 Python 的 stdout 默认走系统代码页（中文系统是 GBK），
+          // 父进程按 UTF-8 解码就会变成乱码方块。
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+        })
       } catch (error) {
         reject(error)
         return

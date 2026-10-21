@@ -68,6 +68,15 @@ def apply_fixes(text: str):
     return text, hits
 
 
+def force_utf8() -> None:
+    """Windows 上 stdout 默认是 GBK，必须显式切到 UTF-8 才能让父进程正确解码。"""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
 def log(msg: str) -> None:
     print(f"[qwen3-worker] {msg}", file=sys.stderr, flush=True)
 
@@ -125,6 +134,7 @@ def wav_to_float32(raw: bytes):
 
 
 def main() -> int:
+    force_utf8()
     model_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
     model_path = os.path.expanduser(model_path)
     if not os.path.isdir(model_path):

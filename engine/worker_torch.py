@@ -42,8 +42,30 @@ HOTWORDS = [
 FIXES = [("挑右", "调优"), ("条右", "调优")]
 
 
+def force_utf8() -> None:
+    """Windows 上 stdout 默认是 GBK，必须显式切到 UTF-8 才能让父进程正确解码。"""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
 def log(msg: str) -> None:
     print(f"[qwen3-torch-worker] {msg}", file=sys.stderr, flush=True)
+
+
+def clean_text(text: str) -> str:
+    """去掉模型回显的对话模板痕迹。"""
+    text = (text or "").strip()
+    # 正常情况下 extract_transcription 已经处理好了，这里是兜底
+    if "<asr_text>" in text:
+        text = text.split("<asr_text>", 1)[1]
+    if "assistant" in text:
+        text = text.split("assistant", 1)[1]
+    for marker in ("system", "<|im_start|>", "<|im_end|>", "user"):
+        text = text.replace(marker, "")
+    return text.strip()
 
 
 def apply_fixes(text: str):
@@ -89,6 +111,7 @@ def wav_to_float32(raw: bytes):
 
 
 def main() -> int:
+    force_utf8()
     model_path = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL)
     if not os.path.isdir(model_path):
         log(f"模型目录不存在：{model_path}")
@@ -155,8 +178,8 @@ def main() -> int:
             with torch.no_grad():
                 generated = model.generate(**inputs, max_new_tokens=256)
             raw = processor.batch_decode(generated, skip_special_tokens=True)[0]
-            text = processor.extract_transcription(raw)
-            text = (text or "").strip()
+            text = processor.extract_transcription(raw) or ""
+            text = clean_text(text)
             text, _hits = apply_fixes(text)
             elapsed = int((time.time() - started) * 1000)
 
