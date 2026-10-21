@@ -57,9 +57,9 @@ const el = {
   state: document.getElementById('state'),
   stats: document.getElementById('stats'),
   diag: document.getElementById('diag'),
-  meter: document.getElementById('meter'),
-  meterFill: document.getElementById('meterFill'),
-  meterLine: document.getElementById('meterLine'),
+  wave: document.getElementById('wave'),
+  level: document.getElementById('level'),
+  levelFill: document.getElementById('levelFill'),
   copy: document.getElementById('copy'),
   save: document.getElementById('save'),
   clear: document.getElementById('clear'),
@@ -173,17 +173,49 @@ function concatFrames(frames) {
 /** 空状态：图标 + 一句引导。 */
 const EMPTY_STATE = `
   <div class="placeholder">
-    <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0" />
-      <path d="M12 18v3" />
-    </svg>
-    <p class="ph-title">点下面的按钮开始说话</p>
-    <p class="ph-hint">说完一句稍作停顿，就会在这里出一行字。全程本地处理，音频不会上传。</p>
+    <div class="ring">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <rect x="9" y="3" width="6" height="11" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0" />
+        <path d="M12 18v3" />
+      </svg>
+    </div>
+    <p class="ph-title">按左下角开始说话</p>
+    <p class="ph-hint">一句说完稍停，这里就会落一行字 · 全程本地处理</p>
   </div>`
 
 function showEmptyState() {
   el.transcript.innerHTML = EMPTY_STATE
+}
+
+/** 顶栏波形：把最近的电平画成滚动竖条，让"在收音"这件事一眼可见。 */
+const WAVE_BARS = 10
+const waveLevels = []
+
+function initWave() {
+  if (!el.wave) return
+  el.wave.innerHTML = ''
+  for (let index = 0; index < WAVE_BARS; index += 1) {
+    el.wave.append(document.createElement('i'))
+  }
+}
+
+function renderWave(recording) {
+  if (!el.wave) return
+  const bars = el.wave.children
+  el.wave.classList.toggle('live', recording)
+  for (let index = 0; index < bars.length; index += 1) {
+    const value = waveLevels[index] ?? 0
+    // 开方压缩：安静时的细小起伏也能看出来，但不会满格乱跳
+    // 分母小一点 → 动态范围更宽，安静和大声的差别一眼可见
+    const height = 2 + Math.min(12, Math.sqrt(Math.max(0, value) / 0.02) * 12)
+    bars[index].style.height = `${height.toFixed(1)}px`
+  }
+}
+
+function pushWaveLevel(level) {
+  waveLevels.push(level)
+  while (waveLevels.length > WAVE_BARS) waveLevels.shift()
 }
 
 // ------------------------------------------------------------------ 录音
@@ -269,6 +301,7 @@ async function openMicrophone(onChunk, onPartial, onError) {
     const level = frameRms(block)
     state.level = level
     if (level > state.peak) state.peak = level
+    pushWaveLevel(level)
 
     if (vad.threshold === null) {
       vad.calibrating.push(level)
@@ -620,9 +653,11 @@ function clearAll() {
 
 function render() {
   const recording = state.phase === 'recording'
-  el.toggle.textContent = recording ? '❚❚' : '▶'
+  // 不能写 textContent：按钮里是 SVG，写文字会把图标整个抹掉。
+  // 图形切换交给 .live 类，状态用 aria-label 和 title 表达。
   el.toggle.classList.toggle('live', recording)
   el.toggle.title = recording ? '暂停（保留内容）' : '开始 / 继续'
+  el.toggle.setAttribute('aria-label', recording ? '暂停录音' : '开始录音')
 
   if (recording) {
     const ms = state.accumulated + (Date.now() - state.startedAt)
@@ -646,13 +681,11 @@ function render() {
     notice
   el.diag.classList.toggle('warn', notice !== '')
 
-  // 电平条：开方压缩动态范围，说话时才有明显的跳动
-  if (el.meterFill) {
+  if (el.levelFill) {
     const scale = (value) => Math.min(100, Math.sqrt(Math.max(0, value) / 0.06) * 100)
-    el.meterFill.style.width = `${scale(state.level)}%`
-    el.meterLine.style.left = `${scale(state.threshold)}%`
-    el.meter.classList.toggle('silent', state.level < state.threshold)
+    el.levelFill.style.width = `${scale(state.level)}%`
   }
+  renderWave(recording)
 
   for (const button of [el.copy, el.save, el.clear]) button.disabled = state.lines.length === 0
 
@@ -761,6 +794,7 @@ async function startDownload() {
 }
 
 async function init() {
+  initWave()
   if (state.lines.length === 0) showEmptyState()
   state.probe = await api.probe()
   document.body.classList.add(`platform-${state.probe.platform}`)

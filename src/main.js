@@ -219,49 +219,55 @@ app.whenReady().then(() => {
         if (process.env.LOCALVOICE_SNAPSHOT_DEMO) {
           try {
             const injected = await window.webContents.executeJavaScript(`
-            (() => {
-              const rows = [
-                ['23:04:27', '首先来猜一猜，下面哪些是现代最重的动物？'],
-                ['23:04:32', '是从这个像素运用到这个像素，沿着画好的路径。'],
-                ['23:04:40', '是时光飞逝，恰好存在六点十五分，是地图上一个真实的坐标，一段精准的海岸线。'],
-                ['23:04:48', '是一字不差的文字，用代码代替你，是用傅里叶函数画出的樱花。'],
-                ['23:04:50', '答案是以上所有。'],
-              ]
-              const host = document.querySelector('.transcript')
-              host.innerHTML = ''
-              document.querySelector('#state').textContent = '录音中 00:54'
-              document.querySelector('#state').classList.add('live')
-              document.querySelector('#stats').textContent = '288 字 · 11 句'
-              document.querySelector('#toggle').textContent = '❚❚'
-              document.querySelector('#toggle').classList.add('live')
-              document.querySelector('#meterFill').style.width = '46%'
-              for (const id of ['copy', 'save', 'clear']) document.getElementById(id).disabled = false
-              document.querySelector('#meterLine').style.left = '12%'
-              document.querySelector('#diag').textContent =
-                '电平 0.0121 · 峰值 0.2250 · 阈值 0.0035 · MacBook Air 麦克风 · 48000Hz · 推理 297ms'
-              for (const [ts, text] of rows) {
-                const line = document.createElement('div')
-                line.className = 'line'
-                const time = document.createElement('time')
-                time.textContent = ts
-                const span = document.createElement('span')
-                span.textContent = text
-                line.append(time, span)
-                host.append(line)
-              }
-              const partial = document.createElement('div')
-              partial.className = 'line partial'
-              const t2 = document.createElement('time')
-              t2.textContent = '23:04:56'
-              const s2 = document.createElement('span')
-              s2.textContent = '各种 AI 平台，包括 Cloud'
-              partial.append(t2, s2)
-              host.append(partial)
-              return host.children.length
-            })()
-          `)
+              (() => {
+                const rows = [
+                  ['23:04:27', '首先来猜一猜，下面哪些是现代最重的动物？'],
+                  ['23:04:32', '是从这个像素运用到这个像素，沿着画好的路径。'],
+                  ['23:04:40', '是时光飞逝，恰好存在六点十五分，是地图上一个真实的坐标，一段精准的海岸线。'],
+                  ['23:04:48', '是一字不差的文字，用代码代替你，是用傅里叶函数画出的樱花。'],
+                  ['23:04:50', '答案是以上所有。'],
+                ]
+                const host = document.querySelector('.transcript')
+                host.innerHTML = ''
+                for (const [ts, text] of rows) {
+                  const line = document.createElement('div')
+                  line.className = 'line'
+                  const time = document.createElement('time')
+                  time.textContent = ts
+                  const span = document.createElement('span')
+                  span.textContent = text
+                  line.append(time, span)
+                  host.append(line)
+                }
+                const partial = document.createElement('div')
+                partial.className = 'line partial'
+                const t2 = document.createElement('time')
+                t2.textContent = '23:04:56'
+                const s2 = document.createElement('span')
+                s2.textContent = '各种 AI 平台，包括 Cloud'
+                partial.append(t2, s2)
+                host.append(partial)
+
+                const state = document.querySelector('#state')
+                state.textContent = '录音中 00:54'
+                state.classList.add('live')
+                document.querySelector('#stats').textContent = '288 字 · 11 句'
+                document.querySelector('#toggle').classList.add('live')
+                document.querySelector('#levelFill').style.width = '46%'
+                document.querySelector('#diag').textContent =
+                  '电平 0.0121 · 峰值 0.2250 · 阈值 0.0035 · MacBook Air 麦克风 · 48000Hz · 推理 297ms'
+
+                const wave = document.querySelector('#wave')
+                wave.classList.add('live')
+                const shape = [.02, .06, .11, .05, .16, .09, .03, .12, .07, .19, .04, .08, .14, .06, .1, .05, .13, .07]
+                ;[...wave.children].forEach((bar, index) => {
+                  bar.style.height = (3 + Math.min(19, Math.sqrt(shape[index % shape.length] / 0.05) * 19)).toFixed(1) + 'px'
+                })
+                for (const id of ['copy', 'save', 'clear']) document.getElementById(id).disabled = false
+                return host.children.length
+              })()
+            `)
             console.error('[snapshot] 注入结果:', injected)
-            // DOM 改完要等一帧真正画出来，否则抓到的还是旧画面
             await new Promise((resolve) => setTimeout(resolve, 800))
           } catch (error) {
             console.error('[snapshot] 注入失败:', error.message)
