@@ -12,6 +12,9 @@ const LIVE = {
   minSpeechMs: 400,
   maxChunkMs: 9000,
   calibrateMs: 1200,
+  /** 阈值下限：防数字静音误触发，但别设太高（实测底噪 0.0005 时 0.008 会吃掉小声） */
+  minThreshold: 0.0035,
+  maxThreshold: 0.03,
 }
 
 const el = {
@@ -185,7 +188,7 @@ async function openMicrophone(onChunk) {
       if (vad.calibrateMs >= LIVE.calibrateMs) {
         const sorted = vad.calibrating.slice().sort((a, b) => a - b)
         const floor = sorted[Math.floor(sorted.length * 0.2)] ?? 0
-        vad.threshold = Math.min(0.03, Math.max(0.008, floor * 3.5))
+        vad.threshold = Math.min(LIVE.maxThreshold, Math.max(LIVE.minThreshold, floor * 3.5))
         vad.noiseFloor = Math.max(floor, 0.0005)
         state.threshold = vad.threshold
       }
@@ -200,7 +203,7 @@ async function openMicrophone(onChunk) {
         vad.trackedMs += ms
         if (vad.trackedMs >= 1000) {
           vad.trackedMs = 0
-          const target = Math.min(0.03, Math.max(0.008, vad.noiseFloor * 3.5))
+          const target = Math.min(LIVE.maxThreshold, Math.max(LIVE.minThreshold, vad.noiseFloor * 3.5))
           // 每次最多挪动 20%，避免阈值抖动把句子切断
           vad.threshold += (target - vad.threshold) * 0.2
           state.threshold = vad.threshold

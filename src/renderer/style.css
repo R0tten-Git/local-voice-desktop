@@ -111,6 +111,11 @@ button {
   transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
 }
 button:hover { background: rgba(127, 127, 127, 0.14); }
+button:focus { outline: none; }
+button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
 button:active { transform: scale(0.97); }
 button.ghost { background: transparent; }
 button:disabled { opacity: 0.45; cursor: default; }
