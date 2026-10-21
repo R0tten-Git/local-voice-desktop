@@ -37,6 +37,9 @@ const el = {
   copyCmd: document.getElementById('copyCmd'),
   openModels: document.getElementById('openModels'),
   download: document.getElementById('download'),
+  envBlock: document.getElementById('envBlock'),
+  installEnv: document.getElementById('installEnv'),
+  envLog: document.getElementById('envLog'),
   bar: document.getElementById('bar'),
   barFill: document.getElementById('barFill'),
   dlText: document.getElementById('dlText'),
@@ -571,6 +574,36 @@ api.onProgress((progress) => {
   }
 })
 
+let installingEnv = false
+
+api.onEnvLog((line) => {
+  el.envLog.classList.remove('hidden')
+  el.envLog.textContent += `${line}\n`
+  el.envLog.scrollTop = el.envLog.scrollHeight
+})
+
+async function installEnvironment() {
+  if (installingEnv) return
+  installingEnv = true
+  el.installEnv.disabled = true
+  el.installEnv.textContent = '安装中…'
+  el.envLog.classList.remove('hidden')
+  el.envLog.textContent = ''
+  try {
+    await api.installEnv()
+    el.envLog.textContent += '\n✓ 环境就绪\n'
+    await init()
+    el.state.textContent = '环境已就绪'
+  } catch (error) {
+    el.envLog.textContent += `\n× 失败：${error.message ?? error}\n`
+    el.installEnv.textContent = '重试安装'
+  } finally {
+    installingEnv = false
+    el.installEnv.disabled = false
+    if (el.installEnv.textContent === '安装中…') el.installEnv.textContent = '安装环境'
+  }
+}
+
 async function startDownload() {
   if (downloading) return
   const modelId = el.model.value
@@ -611,9 +644,17 @@ async function init() {
     el.model.append(option)
   }
 
+  const env = state.probe.environment
+  const envMissing = env !== undefined && env.ready === false
+  el.envBlock.classList.toggle('hidden', !envMissing)
+
   const missing = options.length > 0 && !installed.includes(el.model.value)
-  el.setup.classList.toggle('hidden', !missing)
-  if (missing) {
+  // 环境没准备好时也要把面板露出来，否则用户看不到"安装环境"
+  el.setup.classList.toggle('hidden', !(missing || envMissing))
+  if (envMissing) {
+    el.recommend.textContent = ''
+  }
+  if (missing && !envMissing) {
     const pick = options.find((m) => m.id === recommended) ?? options[0]
     el.recommend.innerHTML =
       `后端 <b>${backend}</b> · 内存 ${totalRamGb} GB${gpuName ? ` · ${gpuName}` : ''}<br>` +
@@ -644,6 +685,7 @@ el.copyCmd.addEventListener('click', () => {
 })
 el.openModels.addEventListener('click', () => void api.openModelsFolder())
 el.download.addEventListener('click', () => void startDownload())
+el.installEnv.addEventListener('click', () => void installEnvironment())
 el.model.addEventListener('change', async () => {
   el.setup.classList.add('hidden')
   const missing = !state.probe.installed.includes(el.model.value)

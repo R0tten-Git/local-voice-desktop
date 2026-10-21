@@ -15,6 +15,17 @@
     </header>
 
     <section id="setup" class="setup hidden">
+      <div id="envBlock" class="env hidden">
+        <div class="setup-head">
+          <strong>需要先准备运行环境</strong>
+          <span class="muted">Python + mlx-audio，约 300 MB</span>
+        </div>
+        <p class="muted small">只需要做一次。会装到 <code>~/.local/venvs/mlx-audio</code>，不改动系统 Python。</p>
+        <div class="setup-actions">
+          <button id="installEnv" class="primary-wide">安装环境</button>
+        </div>
+        <pre id="envLog" class="cmd log hidden"></pre>
+      </div>
       <div class="setup-head">
         <strong>还没有可用的模型</strong>
         <span class="muted">首次使用需要下载 0.7–2.5 GB</span>

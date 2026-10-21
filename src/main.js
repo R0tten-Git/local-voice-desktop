@@ -9,6 +9,7 @@ const path = require('node:path')
 const { Engine } = require('./engine')
 const { probe, MODELS } = require('../scripts/probe')
 const { downloadModel } = require('./downloader')
+const bootstrap = require('./bootstrap')
 
 /** @type {BrowserWindow | undefined} */
 let window
@@ -80,7 +81,23 @@ app.on('before-quit', () => engine.kill())
 
 ipcMain.handle('system:probe', async () => {
   const result = await probe()
-  return { ...result, installed: installed() }
+  return { ...result, installed: installed(), environment: bootstrap.status() }
+})
+
+/** 环境安装：同一时间只跑一个 */
+let installingEnv = false
+
+ipcMain.handle('env:install', async () => {
+  if (installingEnv) throw new Error('环境安装已在进行中')
+  installingEnv = true
+  try {
+    const result = await bootstrap.install((line) => {
+      window?.webContents.send('env:log', line)
+    })
+    return result
+  } finally {
+    installingEnv = false
+  }
 })
 
 ipcMain.handle('engine:start', async (_event, modelId) => {

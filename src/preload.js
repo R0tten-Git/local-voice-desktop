@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('localVoice', {
   transcribe: (wav, language) => ipcRenderer.invoke('engine:transcribe', { wav, language }),
   stop: () => ipcRenderer.invoke('engine:stop'),
   download: (modelId) => ipcRenderer.invoke('model:download', modelId),
+  installEnv: () => ipcRenderer.invoke('env:install'),
+  onEnvLog: (callback) => {
+    const listener = (_event, line) => callback(line)
+    ipcRenderer.on('env:log', listener)
+    return () => ipcRenderer.removeListener('env:log', listener)
+  },
   onProgress: (callback) => {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on('model:progress', listener)

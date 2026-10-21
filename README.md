@@ -10,7 +10,7 @@
 - 独立窗口，**边说边出字**：说话过程中每 2.2 秒刷新一版灰色临时结果，说完一句替换成定稿
 - 可暂停（保留内容）、可复制、可存 markdown
 - 识别引擎 **Qwen3-ASR**（0.6B / 1.7B，4bit / 8bit）跑在本地，模型只加载一次
-- 启动时探测硬件并推荐模型，**应用内一键下载**（进度条 / 断点续传 / 大小校验）
+- 启动时探测硬件并推荐模型，**应用内一键安装环境 + 下载模型**
 - macOS 走 MLX，Windows / Intel Mac 走 llama.cpp（GGUF）
 
 ## 断句策略
@@ -45,14 +45,10 @@ npm run dev          # 启动应用
 npm run probe        # 只看硬件探测与推荐结果（不开窗口）
 ```
 
-引擎（macOS Apple Silicon）：
-
-```bash
-uv venv ~/.local/venvs/mlx-audio --python 3.12
-~/.local/venvs/mlx-audio/bin/pip install "mlx-audio==0.5.5" sounddevice numpy huggingface_hub
-```
-
-**模型不用手动下**：应用启动会探测硬件并推荐一个模型，点「下载并安装」直接从魔搭拉取（带进度条、断点续传、大小校验），下完自动可用。
+**运行环境和模型都不用碰终端**：应用启动会检查 `~/.local/venvs/mlx-audio`，
+缺了就显示「安装环境」按钮（uv → 独立 Python 3.12 → venv → 依赖，约 300 MB、3–5 分钟，
+日志实时显示，不改动系统 Python）；环境就绪后再按硬件推荐下载模型（魔搭直链，
+带进度条、断点续传、大小校验）。
 
 模型存放在 `~/models/<仓库名>`，应用启动时自动发现。
 
