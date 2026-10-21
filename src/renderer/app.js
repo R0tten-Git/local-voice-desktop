@@ -13,6 +13,8 @@ const LIVE = {
   maxChunkMs: 9000,
   calibrateMs: 1200,
   /** 阈值下限：防数字静音误触发，但别设太高（实测底噪 0.0005 时 0.008 会吃掉小声） */
+  /** 句首回卷：触发时把前面这段也带上，避免切掉第一个字或被重复解码 */
+  prerollMs: 400,
   minThreshold: 0.0035,
   maxThreshold: 0.03,
 }
@@ -24,6 +26,10 @@ const el = {
   cmd: document.getElementById('cmd'),
   copyCmd: document.getElementById('copyCmd'),
   openModels: document.getElementById('openModels'),
+  download: document.getElementById('download'),
+  bar: document.getElementById('bar'),
+  barFill: document.getElementById('barFill'),
+  dlText: document.getElementById('dlText'),
   transcript: document.getElementById('transcript'),
   toggle: document.getElementById('toggle'),
   state: document.getElementById('state'),
@@ -143,6 +149,10 @@ async function openMicrophone(onChunk) {
   source.connect(processor)
   processor.connect(audio.destination)
 
+  /** 最近若干帧的环形缓冲，只在"没在说话"时维护 */
+  const preroll = []
+  const prerollMax = Math.max(1, Math.ceil(LIVE.prerollMs / 256))
+
   const vad = {
     threshold: null,
     noiseFloor: 0,
@@ -208,13 +218,16 @@ async function openMicrophone(onChunk) {
           vad.threshold += (target - vad.threshold) * 0.2
           state.threshold = vad.threshold
         }
+        preroll.push(block)
+        if (preroll.length > prerollMax) preroll.shift()
         return
       }
       vad.speaking = true
-      vad.frames = [block]
+      vad.frames = [...preroll, block]
       vad.voicedMs = ms
       vad.silenceMs = 0
       vad.chunkMs = ms
+      preroll.length = 0
       return
     }
 
@@ -386,6 +399,60 @@ function downloadCommand(model) {
   ].join('\n')
 }
 
+let downloading = false
+
+/** 把字节数写成人话。 */
+function human(bytes) {
+  if (!Number.isFinite(bytes)) return ''
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
+  return `${Math.round(bytes / 1e3)} KB`
+}
+
+api.onProgress((progress) => {
+  if (progress.phase === 'file') {
+    el.dlText.textContent = `(${progress.index}/${progress.files}) ${progress.file}`
+    return
+  }
+  if (progress.phase === 'bytes') {
+    const pct = progress.totalBytes > 0 ? (progress.doneBytes / progress.totalBytes) * 100 : 0
+    el.barFill.style.width = `${pct.toFixed(1)}%`
+    const speed = progress.bytesPerSecond ? ` · ${human(progress.bytesPerSecond)}/s` : ''
+    el.dlText.textContent =
+      `${human(progress.doneBytes)} / ${human(progress.totalBytes)} · ${pct.toFixed(0)}%${speed}`
+    return
+  }
+  if (progress.phase === 'done') {
+    el.barFill.style.width = '100%'
+    el.dlText.textContent = `完成 · ${human(progress.totalBytes)}`
+  }
+})
+
+async function startDownload() {
+  if (downloading) return
+  const modelId = el.model.value
+  downloading = true
+  el.download.disabled = true
+  el.download.textContent = '下载中…'
+  el.bar.classList.remove('hidden')
+  el.barFill.style.width = '0%'
+  el.dlText.textContent = '正在连接魔搭…'
+  try {
+    await api.download(modelId)
+    el.dlText.textContent = '下载完成，正在校验…'
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    await init()
+    el.state.textContent = '模型已就绪'
+  } catch (error) {
+    el.dlText.textContent = `下载失败：${error.message ?? error}`
+    el.download.textContent = '重试下载'
+  } finally {
+    downloading = false
+    el.download.disabled = false
+    if (el.download.textContent === '下载中…') el.download.textContent = '下载并安装'
+  }
+}
+
 async function init() {
   state.probe = await api.probe()
   document.body.classList.add(`platform-${state.probe.platform}`)
@@ -433,6 +500,7 @@ el.copyCmd.addEventListener('click', () => {
   setTimeout(() => (el.copyCmd.textContent = '复制下载命令'), 1500)
 })
 el.openModels.addEventListener('click', () => void api.openModelsFolder())
+el.download.addEventListener('click', () => void startDownload())
 el.model.addEventListener('change', async () => {
   el.setup.classList.add('hidden')
   const missing = !state.probe.installed.includes(el.model.value)
@@ -440,6 +508,9 @@ el.model.addEventListener('change', async () => {
   if (missing) {
     const model = state.probe.options.find((m) => m.id === el.model.value)
     el.cmd.textContent = downloadCommand(model)
+    el.bar.classList.add('hidden')
+    el.barFill.style.width = '0%'
+    el.dlText.textContent = ''
   }
 })
 

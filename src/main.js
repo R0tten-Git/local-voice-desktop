@@ -8,6 +8,7 @@ const path = require('node:path')
 
 const { Engine } = require('./engine')
 const { probe, MODELS } = require('../scripts/probe')
+const { downloadModel } = require('./downloader')
 
 /** @type {BrowserWindow | undefined} */
 let window
@@ -100,6 +101,25 @@ ipcMain.handle('engine:transcribe', async (_event, { wav, language }) => {
 ipcMain.handle('engine:stop', async () => {
   engine.kill()
   return true
+})
+
+/** 同一时间只允许一个下载任务 */
+let downloading = undefined
+
+ipcMain.handle('model:download', async (_event, modelId) => {
+  if (downloading !== undefined) throw new Error('已有下载在进行中')
+  const model = MODELS.find((m) => m.id === modelId)
+  if (!model) throw new Error(`未知模型：${modelId}`)
+  const dest = modelDir(model.repo)
+  downloading = modelId
+  try {
+    const result = await downloadModel(model.repo, dest, (progress) => {
+      window?.webContents.send('model:progress', { modelId, ...progress })
+    })
+    return { ...result, modelId }
+  } finally {
+    downloading = undefined
+  }
 })
 
 ipcMain.handle('app:saveMarkdown', async (_event, { text, suggestedName }) => {

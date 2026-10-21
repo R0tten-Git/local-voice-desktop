@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('localVoice', {
   start: (modelId) => ipcRenderer.invoke('engine:start', modelId),
   transcribe: (wav, language) => ipcRenderer.invoke('engine:transcribe', { wav, language }),
   stop: () => ipcRenderer.invoke('engine:stop'),
+  download: (modelId) => ipcRenderer.invoke('model:download', modelId),
+  onProgress: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('model:progress', listener)
+    return () => ipcRenderer.removeListener('model:progress', listener)
+  },
   openModelsFolder: () => ipcRenderer.invoke('app:openModelsFolder'),
   saveMarkdown: (text, suggestedName) => ipcRenderer.invoke('app:saveMarkdown', { text, suggestedName }),
   copy: (text) => ipcRenderer.invoke('app:copy', text),

@@ -32,17 +32,16 @@ npm run dev          # 启动应用
 npm run probe        # 只看硬件探测与推荐结果（不开窗口）
 ```
 
-准备引擎（macOS Apple Silicon）：
+引擎（macOS Apple Silicon）：
 
 ```bash
 uv venv ~/.local/venvs/mlx-audio --python 3.12
 ~/.local/venvs/mlx-audio/bin/pip install "mlx-audio==0.5.5" sounddevice numpy huggingface_hub
-
-# 模型：国内走魔搭
-git clone https://www.modelscope.cn/mlx-community/Qwen3-ASR-1.7B-4bit.git ~/models/Qwen3-ASR-1.7B-4bit
 ```
 
-模型放在 `~/models/<仓库名>`，应用会自动发现。
+**模型不用手动下**：应用启动会探测硬件并推荐一个模型，点「下载并安装」直接从魔搭拉取（带进度条、断点续传、大小校验），下完自动可用。
+
+模型存放在 `~/models/<仓库名>`，应用启动时自动发现。
 
 ## 打包
 
