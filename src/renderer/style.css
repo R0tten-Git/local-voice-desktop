@@ -301,6 +301,16 @@ button.icon:disabled { opacity: 0.26; cursor: default; background: transparent; 
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
 }
 [data-tip]:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* 顶栏元素贴着窗口上边缘，提示必须向下弹，否则会被裁掉只剩一条黑边 */
+[data-tip][data-tip-pos="bottom"]::after {
+  bottom: auto;
+  top: calc(100% + 9px);
+  transform: translateX(-50%) translateY(-3px);
+}
+[data-tip][data-tip-pos="bottom"]:hover::after {
+  transform: translateX(-50%) translateY(0);
+}
 button.icon:disabled::after { opacity: 0; }
 
 /* 底坞顶部的收音电平细线 */
