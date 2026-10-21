@@ -1,6 +1,6 @@
 {
   "name": "local-voice-desktop",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": false,
   "description": "Local, offline real-time speech-to-text for macOS and Windows — Qwen3-ASR, no cloud, no account.",
   "type": "commonjs",
@@ -44,15 +44,17 @@
       "target": [
         "dmg"
       ],
+      "icon": "build/icon.png",
+      "artifactName": "LocalVoice-${version}-arm64.${ext}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "LocalVoice 需要麦克风来把你说的话转成文字。音频只在本机处理。"
-      },
-      "icon": "build/icon.png"
+      }
     },
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "artifactName": "LocalVoice-${version}-x64-setup.${ext}"
     }
   },
   "allowScripts": {

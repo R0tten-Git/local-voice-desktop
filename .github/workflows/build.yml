@@ -16,7 +16,7 @@ jobs:
             artifact: LocalVoice-*-arm64.dmg
           - os: windows-latest
             script: build:win
-            artifact: LocalVoice-*-setup.exe
+            artifact: LocalVoice-*-x64-setup.exe
 
     runs-on: ${{ matrix.os }}
     steps:
