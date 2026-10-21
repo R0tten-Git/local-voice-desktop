@@ -18,7 +18,7 @@ const os = require('node:os')
 const path = require('node:path')
 
 const READY_TIMEOUT_MS = 180_000
-const REQUEST_TIMEOUT_MS = 120_000
+const REQUEST_TIMEOUT_MS = 30_000
 const IDLE_MS = 300_000
 const WAKE_GAP_MS = 90_000
 
@@ -194,7 +194,7 @@ class Engine {
   }
 
   /** 转写一段 16kHz 单声道 PCM16 WAV。 */
-  async transcribe(wav, language = 'auto') {
+  async transcribe(wav, language = 'auto', timeoutMs = REQUEST_TIMEOUT_MS) {
     if (!this.model) throw new Error('引擎尚未启动：请先选择模型')
     const now = Date.now()
     if (this.child && this.lastUsedAt && now - this.lastUsedAt > WAKE_GAP_MS) {
@@ -202,20 +202,20 @@ class Engine {
       this.kill()
     }
     try {
-      const result = await this.attempt(wav, language)
+      const result = await this.attempt(wav, language, timeoutMs)
       this.lastUsedAt = Date.now()
       return result
     } catch (error) {
       if (!isTransportFailure(error)) throw error
       this.log(`传输层失败（${error.message}），重启后重试一次`)
       this.kill()
-      const result = await this.attempt(wav, language)
+      const result = await this.attempt(wav, language, timeoutMs)
       this.lastUsedAt = Date.now()
       return result
     }
   }
 
-  async attempt(wav, language) {
+  async attempt(wav, language, timeoutMs = REQUEST_TIMEOUT_MS) {
     await this.ensure(this.model)
     const child = this.child
     if (!child) throw new Error('引擎不可用')
@@ -223,8 +223,10 @@ class Engine {
     const result = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error('识别超时'))
-      }, REQUEST_TIMEOUT_MS)
+        this.log(`识别超时（${timeoutMs}ms），重启引擎`)
+        this.kill()
+        reject(new Error('识别超时，引擎已重启'))
+      }, timeoutMs)
       this.pending.set(id, { resolve, reject, timer })
     })
     child.stdin.write(`${JSON.stringify({ id, wav: wav.toString('base64'), language })}\n`)

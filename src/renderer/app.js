@@ -383,7 +383,7 @@ function transcribePartial(samples) {
   if (partialBusy) return
   partialBusy = true
   api
-    .transcribe(toBase64(encodeWav(samples, LIVE.sampleRate)), 'auto')
+    .transcribe(toBase64(encodeWav(samples, LIVE.sampleRate)), 'auto', true)
     .then((result) => showPartial((result.text ?? '').trim()))
     .catch(() => {})
     .finally(() => {

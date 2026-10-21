@@ -13,10 +13,22 @@ const bootstrap = require('./bootstrap')
 
 /** @type {BrowserWindow | undefined} */
 let window
-const engine = new Engine((line) => {
+/** 引擎日志同时写一份到文件：出问题时不用复现也能看现场。 */
+const LOG_DIR = path.join(os.homedir(), 'Library', 'Logs')
+const LOG_PATH = path.join(LOG_DIR, 'LocalVoice.log')
+
+function logLine(line) {
   console.log('[engine]', line)
   window?.webContents.send('engine:log', String(line))
-})
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true })
+    fs.appendFileSync(LOG_PATH, `${new Date().toISOString()} ${line}\n`)
+  } catch {
+    /* 日志失败不影响主流程 */
+  }
+}
+
+const engine = new Engine(logLine)
 
 /** 模型目录：默认 ~/models/<仓库名>。 */
 function modelDir(repo) {
@@ -110,9 +122,14 @@ ipcMain.handle('engine:start', async (_event, modelId) => {
   return { modelId, modelPath: dir, loadMs: Date.now() - started }
 })
 
-ipcMain.handle('engine:transcribe', async (_event, { wav, language }) => {
+ipcMain.handle('engine:transcribe', async (_event, { wav, language, partial }) => {
   if (typeof wav !== 'string' || wav.length === 0) throw new Error('音频为空')
-  return await engine.transcribe(Buffer.from(wav, 'base64'), language ?? 'auto')
+  // 临时稿允许更早放弃：它只是预览，卡住不能拖累定稿
+  return await engine.transcribe(
+    Buffer.from(wav, 'base64'),
+    language ?? 'auto',
+    partial === true ? 8_000 : 30_000,
+  )
 })
 
 ipcMain.handle('engine:stop', async () => {
