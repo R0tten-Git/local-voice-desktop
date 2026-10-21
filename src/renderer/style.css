@@ -90,6 +90,7 @@ select:focus-visible {
 }
 
 .line { display: flex; gap: 8px; margin-bottom: 7px; }
+.line.partial { opacity: 0.5; font-style: italic; }
 .line time { color: var(--muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; font-size: 12px; }
 .placeholder { color: var(--muted); font-size: 12.5px; }
 

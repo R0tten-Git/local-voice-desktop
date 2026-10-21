@@ -11,10 +11,16 @@ const LIVE = {
   silenceMs: 950,
   minSpeechMs: 400,
   /** 硬上限（兜底，正常情况下用不到） */
-  maxChunkMs: 20000,
+  maxChunkMs: 12000,
   /** 一段超过这么久之后，遇到 350ms 的短停顿就切（逗号级停顿，不会劈开词组） */
-  midCutAfterMs: 12000,
+  midCutAfterMs: 5000,
   midSilenceMs: 350,
+  /** 边说边出的临时结果：每隔这么久把当前缓冲送一次识别 */
+  partialEveryMs: 2200,
+  /** 临时结果最多用多长的音频（越长越慢，10 秒够覆盖一句话） */
+  partialWindowMs: 10000,
+  /** 至少要说这么久才值得送一次临时结果 */
+  partialMinMs: 1500,
   calibrateMs: 1200,
   /** 阈值下限：防数字静音误触发，但别设太高（实测底噪 0.0005 时 0.008 会吃掉小声） */
   /** 句首回卷：触发时把前面这段也带上，避免切掉第一个字或被重复解码 */
@@ -142,7 +148,7 @@ function concatFrames(frames) {
 
 // ------------------------------------------------------------------ 录音
 
-async function openMicrophone(onChunk) {
+async function openMicrophone(onChunk, onPartial) {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
@@ -159,6 +165,7 @@ async function openMicrophone(onChunk) {
 
   const vad = {
     threshold: null,
+    lastPartialAt: 0,
     /** 强制切分后的冷却截止时间：这期间触发不带回卷，否则会把切开的尾巴重复识别 */
     prerollMuteUntil: 0,
     noiseFloor: 0,
@@ -249,6 +256,21 @@ async function openMicrophone(onChunk) {
     }
 
     const longEnough = vad.voicedMs >= LIVE.minSpeechMs
+    // 边说边出：不影响正式切句，只是先把"当前听到的"显示出来
+    const now = Date.now()
+    if (
+      onPartial !== undefined &&
+      vad.chunkMs >= LIVE.partialMinMs &&
+      now - vad.lastPartialAt >= LIVE.partialEveryMs
+    ) {
+      vad.lastPartialAt = now
+      const windowFrames = Math.min(
+        vad.frames.length,
+        Math.max(1, Math.floor(LIVE.partialWindowMs / 256)),
+      )
+      onPartial(concatFrames(vad.frames.slice(-windowFrames)))
+    }
+
     if (vad.silenceMs >= LIVE.silenceMs && longEnough) {
       flush()
     } else if (vad.chunkMs >= LIVE.midCutAfterMs && vad.silenceMs >= LIVE.midSilenceMs && longEnough) {
@@ -279,6 +301,46 @@ async function openMicrophone(onChunk) {
 
 // ------------------------------------------------------------------ 转写
 
+/** 当前正在说话时的临时行（灰色，定稿后会被替换）。 */
+let partialNode
+
+function clearPartial() {
+  partialNode?.remove()
+  partialNode = undefined
+}
+
+function showPartial(text) {
+  if (!text) return
+  const placeholder = el.transcript.querySelector('.placeholder')
+  if (placeholder) placeholder.remove()
+  if (partialNode === undefined) {
+    partialNode = document.createElement('div')
+    partialNode.className = 'line partial'
+    const time = document.createElement('time')
+    time.textContent = clock(new Date())
+    const body = document.createElement('span')
+    partialNode.append(time, body)
+    el.transcript.append(partialNode)
+  }
+  partialNode.querySelector('span').textContent = text
+  el.transcript.scrollTop = el.transcript.scrollHeight
+}
+
+/** 临时结果的请求：跑得慢就跳过这一轮，绝不拖累定稿。 */
+let partialBusy = false
+
+function transcribePartial(samples) {
+  if (partialBusy) return
+  partialBusy = true
+  api
+    .transcribe(toBase64(encodeWav(samples, LIVE.sampleRate)), 'auto')
+    .then((result) => showPartial((result.text ?? '').trim()))
+    .catch(() => {})
+    .finally(() => {
+      partialBusy = false
+    })
+}
+
 function transcribe(samples) {
   state.pending += 1
   render()
@@ -287,6 +349,7 @@ function transcribe(samples) {
       const wav = encodeWav(samples, LIVE.sampleRate)
       const result = await api.transcribe(toBase64(wav), 'auto')
       const text = (result.text ?? '').trim()
+      clearPartial()
       if (text) appendLine(text)
     })
     .catch((error) => {
@@ -393,7 +456,10 @@ async function start() {
   try {
     const info = await api.start(modelId)
     el.state.textContent = `引擎就绪（${info.loadMs}ms）`
-    state.session = await openMicrophone((samples) => transcribe(samples))
+    state.session = await openMicrophone(
+      (samples) => transcribe(samples),
+      (samples) => transcribePartial(samples),
+    )
     state.phase = 'recording'
     state.startedAt = Date.now()
     state.timer = setInterval(render, 500)
@@ -406,6 +472,7 @@ async function start() {
 }
 
 function pause() {
+  clearPartial()
   state.session?.stop()
   state.session = undefined
   state.accumulated += Date.now() - state.startedAt
@@ -425,6 +492,7 @@ function clearAll() {
   state.session = undefined
   clearInterval(state.timer)
   state.timer = undefined
+  clearPartial()
   state.lines = []
   state.accumulated = 0
   state.peak = 0
