@@ -19,7 +19,9 @@
     "dev": "electron .",
     "probe": "node scripts/probe.js",
     "build:mac": "electron-builder --mac --arm64 --publish never",
-    "build:win": "electron-builder --win --x64 --publish never"
+    "build:win": "electron-builder --win --x64 --publish never",
+    "prebuild:mac": "node scripts/fetch-uv.mjs",
+    "prebuild:win": "node scripts/fetch-uv.mjs"
   },
   "devDependencies": {
     "electron": "^33.2.0",
