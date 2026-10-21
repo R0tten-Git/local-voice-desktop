@@ -46,7 +46,8 @@
       ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "LocalVoice 需要麦克风来把你说的话转成文字。音频只在本机处理。"
-      }
+      },
+      "icon": "build/icon.png"
     },
     "win": {
       "target": [
@@ -56,5 +57,6 @@
   },
   "allowScripts": {
     "electron@33.4.11": true
-  }
+  },
+  "author": "R0tten-Git"
 }
