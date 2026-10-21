@@ -142,6 +142,8 @@ async function openMicrophone(onChunk) {
 
   const vad = {
     threshold: null,
+    noiseFloor: 0,
+    trackedMs: 0,
     calibrating: [],
     calibrateMs: 0,
     speaking: false,
@@ -184,6 +186,7 @@ async function openMicrophone(onChunk) {
         const sorted = vad.calibrating.slice().sort((a, b) => a - b)
         const floor = sorted[Math.floor(sorted.length * 0.2)] ?? 0
         vad.threshold = Math.min(0.03, Math.max(0.008, floor * 3.5))
+        vad.noiseFloor = Math.max(floor, 0.0005)
         state.threshold = vad.threshold
       }
       return
@@ -191,7 +194,19 @@ async function openMicrophone(onChunk) {
 
     const voiced = level >= vad.threshold
     if (!vad.speaking) {
-      if (!voiced) return
+      if (!voiced) {
+        // 只在静音帧上估计噪声，所以有人连续说话时阈值不会被抬高
+        vad.noiseFloor = vad.noiseFloor * 0.9 + level * 0.1
+        vad.trackedMs += ms
+        if (vad.trackedMs >= 1000) {
+          vad.trackedMs = 0
+          const target = Math.min(0.03, Math.max(0.008, vad.noiseFloor * 3.5))
+          // 每次最多挪动 20%，避免阈值抖动把句子切断
+          vad.threshold += (target - vad.threshold) * 0.2
+          state.threshold = vad.threshold
+        }
+        return
+      }
       vad.speaking = true
       vad.frames = [block]
       vad.voicedMs = ms
@@ -363,6 +378,7 @@ function downloadCommand(model) {
 
 async function init() {
   state.probe = await api.probe()
+  document.body.classList.add(`platform-${state.probe.platform}`)
   const { options, recommended, installed, backend, totalRamGb, gpuName } = state.probe
 
   el.model.innerHTML = ''

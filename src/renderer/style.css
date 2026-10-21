@@ -41,6 +41,9 @@ body {
   -webkit-app-region: drag;
 }
 .titlebar select, .titlebar button { -webkit-app-region: no-drag; }
+/* macOS 用 hiddenInset 时红绿灯浮在内容上，必须让出左侧空间 */
+body.platform-darwin .titlebar { padding-left: 80px; }
+
 .brand { font-weight: 650; letter-spacing: 0.01em; }
 .sub { color: var(--muted); font-size: 12px; }
 .spacer { flex: 1 1 auto; }
