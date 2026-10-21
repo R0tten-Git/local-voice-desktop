@@ -376,6 +376,9 @@ function render() {
     el.state.classList.add('live')
   } else {
     el.state.classList.remove('live')
+    // 暂停后必须改写这行，否则会一直挂着"录音中"
+    el.state.textContent =
+      state.lines.length > 0 ? `已暂停 ${elapsedText(state.accumulated)}` : '就绪'
   }
 
   const chars = state.lines.reduce((sum, line) => sum + line.text.length, 0)
