@@ -75,6 +75,15 @@ const state = {
   startedAt: 0,
   accumulated: 0,
   timer: undefined,
+  /** 需要一直挂在底部诊断行上的提示（错误等） */
+  notice: '',
+  /** 麦克风诊断信息（设备名 / 采样率） */
+  audioInfo: '',
+  /** 临时结果的间隔，按最近的推理耗时动态调整 */
+  partialEveryMs: 1500,
+  /** 最近几次推理耗时，用来算平均值 */
+  inferenceSamples: [],
+  lastInferenceMs: 0,
 }
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -394,6 +403,7 @@ function transcribe(samples) {
       const costMs = Math.round((result.inferenceSeconds ?? 0) * 1000)
       state.lastInferenceMs = costMs
       if (costMs > 0) {
+        state.inferenceSamples ??= []
         state.inferenceSamples.push(costMs)
         if (state.inferenceSamples.length > 4) state.inferenceSamples.shift()
         const average =
