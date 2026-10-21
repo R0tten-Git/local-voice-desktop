@@ -12,15 +12,34 @@ const os = require('node:os')
 const path = require('node:path')
 
 const HOME = os.homedir()
-const VENV = process.env.LOCAL_VOICE_VENV ?? path.join(HOME, '.local/venvs/mlx-audio')
-const VENV_PYTHON = path.join(VENV, 'bin/python')
-const UV = path.join(HOME, '.local/bin/uv')
+const IS_WIN = process.platform === 'win32'
+/** Apple Silicon 用 MLX；其余平台用 torch + transformers */
+const BACKEND = process.platform === 'darwin' && process.arch === 'arm64' ? 'mlx' : 'torch'
 
-const PACKAGES = ['mlx-audio==0.5.5', 'sounddevice', 'numpy', 'huggingface_hub']
+const VENV = process.env.LOCAL_VOICE_VENV ?? path.join(HOME, '.local/venvs/mlx-audio')
+const VENV_PYTHON = IS_WIN
+  ? path.join(VENV, 'Scripts/python.exe')
+  : path.join(VENV, 'bin/python')
+const UV = path.join(HOME, '.local/bin', IS_WIN ? 'uv.exe' : 'uv')
+const UV_DIR = path.join(HOME, '.local/bin')
+
+/** 两个后端的依赖完全不同：MLX 只认 Apple Silicon，torch 全平台通用。 */
+const PACKAGES = BACKEND === 'mlx'
+  ? ['mlx-audio==0.5.5', 'sounddevice', 'numpy', 'huggingface_hub']
+  : ['torch', 'transformers', 'numpy', 'huggingface_hub', 'scipy']
+
+/** 校验用的 import 也要跟着后端走。 */
+const IMPORT_CHECK = BACKEND === 'mlx'
+  ? 'import mlx_audio, numpy, sounddevice'
+  : 'import torch, transformers, numpy, scipy'
 
 /** 找系统 python3（用来引导 uv）。 */
 function systemPython() {
-  const candidates = ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3']
+  const candidates = IS_WIN
+    ? ['python', 'py']
+    : ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3']
+  // Windows 上 'python'/'py' 要走 PATH，存在性由 run() 决定
+  if (IS_WIN) return 'python'
   return candidates.find((p) => fs.existsSync(p))
 }
 
@@ -31,7 +50,7 @@ function status() {
   }
   try {
     const { spawnSync } = require('node:child_process')
-    const probe = spawnSync(VENV_PYTHON, ['-c', 'import mlx_audio, numpy, sounddevice'], {
+    const probe = spawnSync(VENV_PYTHON, ['-c', IMPORT_CHECK], {
       timeout: 60_000,
       encoding: 'utf8',
     })
@@ -51,7 +70,10 @@ function status() {
 function run(command, args, onLog, timeoutMs = 600_000) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      env: { ...process.env, PATH: `${path.join(HOME, '.local/bin')}:${process.env.PATH ?? ''}` },
+      env: {
+        ...process.env,
+        PATH: `${UV_DIR}${path.delimiter}${process.env.PATH ?? ''}`,
+      },
     })
     let output = ''
     let settled = false
@@ -121,14 +143,14 @@ async function install(onLog = () => {}) {
   }
 
   // 4. 依赖（约 300MB）
-  onLog(`④ 安装依赖：${PACKAGES.join(' ')}（约 300MB，几分钟）…`)
+  onLog(`④ 安装依赖：${PACKAGES.join(' ')}（约 ${BACKEND === 'mlx' ? 300 : 900}MB，几分钟）…`)
   await run(UV, ['pip', 'install', '--python', VENV_PYTHON, ...PACKAGES], onLog)
 
   onLog('⑤ 校验…')
-  await run(VENV_PYTHON, ['-c', 'import mlx_audio, numpy, sounddevice; print("ok")'], onLog)
+  await run(VENV_PYTHON, ['-c', `${IMPORT_CHECK}; print("ok")`], onLog)
   onLog('环境就绪')
 
   return status()
 }
 
-module.exports = { status, install, VENV_PYTHON, UV }
+module.exports = { status, install, VENV_PYTHON, UV, BACKEND }

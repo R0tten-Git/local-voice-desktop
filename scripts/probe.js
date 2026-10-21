@@ -67,6 +67,30 @@ const MODELS = [
     note: 'Windows / Intel Mac：走 llama.cpp + CUDA 或 CPU',
   },
   {
+    id: 'qwen3-asr-1.7b-hf',
+    repo: 'Qwen/Qwen3-ASR-1.7B-hf',
+    label: 'Qwen3-ASR 1.7B · HF 格式',
+    sizeGb: 4.09,
+    rssGb: 7.0,
+    accuracy: 100.0,
+    latencyMs: 2100,
+    backends: ['torch'],
+    tier: 'balanced',
+    note: 'Windows / Intel Mac：有 NVIDIA 显卡才流畅（CPU 约 2 秒/句）',
+  },
+  {
+    id: 'qwen3-asr-0.6b-hf',
+    repo: 'Qwen/Qwen3-ASR-0.6B-hf',
+    label: 'Qwen3-ASR 0.6B · HF 格式',
+    sizeGb: 1.58,
+    rssGb: 3.0,
+    accuracy: 98.4,
+    latencyMs: 700,
+    backends: ['torch'],
+    tier: 'fallback',
+    note: '没有独立显卡时用这个，内存占用小一半',
+  },
+  {
     id: 'qwen3-asr-0.6b-gguf-q8',
     repo: 'unslothai/Qwen3-ASR-0.6B-GGUF',
     label: 'Qwen3-ASR 0.6B · GGUF Q8',
@@ -151,8 +175,12 @@ async function probe() {
   const gpu = platform === 'darwin' ? await probeMac() : platform === 'win32' ? await probeWindows() : {}
   const vram = gpu.gpuVendor === 'nvidia' ? await probeNvidiaVram() : undefined
 
-  /** Apple Silicon 才有 MLX；其他平台走 llama.cpp。 */
-  const backend = platform === 'darwin' && arch === 'arm64' ? 'mlx' : 'llama.cpp'
+  /**
+   * Apple Silicon 用 MLX（最快、内存最省）；
+   * 其他平台（Windows / Intel Mac / Linux）用 torch + transformers，
+   * 官方 HF 权重在两个平台是同一套，质量一致。
+   */
+  const backend = platform === 'darwin' && arch === 'arm64' ? 'mlx' : 'torch'
 
   const candidates = MODELS.filter((m) => m.backends.includes(backend))
   /** 内存要留一半给系统和应用本身，这是经验值。 */

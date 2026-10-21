@@ -1,0 +1,74 @@
+name: build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            script: build:mac
+            artifact: LocalVoice-*-arm64.dmg
+          - os: windows-latest
+            script: build:win
+            artifact: LocalVoice-*-setup.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Syntax check
+        shell: bash
+        run: |
+          for f in src/main.js src/preload.js src/engine.js src/downloader.js \
+                   src/bootstrap.js scripts/probe.js src/renderer/app.js; do
+            node --check "$f"
+          done
+          python -m py_compile engine/worker.py engine/worker_torch.py
+
+      - name: Package
+        run: npm run ${{ matrix.script }}
+        env:
+          # 未配置证书时不要尝试签名
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-build
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: warn
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: false
+          prerelease: false

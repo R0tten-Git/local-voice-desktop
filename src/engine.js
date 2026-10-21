@@ -22,20 +22,29 @@ const REQUEST_TIMEOUT_MS = 120_000
 const IDLE_MS = 300_000
 const WAKE_GAP_MS = 90_000
 
-/** 打包后 worker 在 resources/engine，开发时在仓库的 engine/。 */
+/**
+ * Apple Silicon 用 MLX 版 worker，其余平台用 torch 版。
+ * 两者协议完全一致，主进程只换脚本，不用改引擎桥。
+ */
 function workerScript() {
+  const name = process.platform === 'darwin' && process.arch === 'arm64'
+    ? 'worker.py'
+    : 'worker_torch.py'
   const candidates = [
-    path.join(process.resourcesPath ?? '', 'engine', 'worker.py'),
-    path.join(__dirname, '..', 'engine', 'worker.py'),
+    path.join(process.resourcesPath ?? '', 'engine', name),
+    path.join(__dirname, '..', 'engine', name),
   ]
   return candidates.find((p) => fs.existsSync(p)) ?? candidates[1]
 }
 
-/** 找一个能跑 mlx-audio 的 python。 */
+/** 找应用自己的 python（venv 里那个），Windows 与 POSIX 的目录结构不同。 */
 function findPython() {
+  const venv = process.env.LOCAL_VOICE_VENV ?? path.join(os.homedir(), '.local/venvs/mlx-audio')
   const candidates = [
     process.env.LOCAL_VOICE_PYTHON,
-    path.join(os.homedir(), '.local/venvs/mlx-audio/bin/python'),
+    process.platform === 'win32'
+      ? path.join(venv, 'Scripts', 'python.exe')
+      : path.join(venv, 'bin', 'python'),
     '/opt/homebrew/bin/python3',
     '/usr/bin/python3',
   ].filter(Boolean)

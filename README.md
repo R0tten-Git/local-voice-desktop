@@ -11,7 +11,16 @@
 - 可暂停（保留内容）、可复制、可存 markdown
 - 识别引擎 **Qwen3-ASR**（0.6B / 1.7B，4bit / 8bit）跑在本地，模型只加载一次
 - 启动时探测硬件并推荐模型，**应用内一键安装环境 + 下载模型**
-- macOS 走 MLX，Windows / Intel Mac 走 llama.cpp（GGUF）
+- **两个后端，同一套权重**：Apple Silicon 走 MLX（省内存、最快）；Windows / Intel Mac 走 torch + transformers（有 NVIDIA 显卡会自动用 CUDA）
+
+## 平台
+
+| 平台 | 后端 | 模型 | 状态 |
+|---|---|---|---|
+| macOS Apple Silicon | MLX | MLX 量化版（0.7 / 1.6 / 2.5 GB） | ✅ 已验证 |
+| Windows + NVIDIA | torch + CUDA | HF 格式（1.6 / 4.1 GB） | 🟡 代码就绪，CI 构建中 |
+| Windows 无独显 | torch + CPU | HF 格式 0.6B（1.6 GB） | 🟡 同上 |
+| Intel Mac | torch + CPU | HF 格式 | 🟡 同上 |
 
 ## 断句策略
 
