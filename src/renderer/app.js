@@ -8,18 +8,18 @@ const api = window.localVoice
 
 const LIVE = {
   sampleRate: 16000,
-  silenceMs: 950,
+  silenceMs: 700,
   minSpeechMs: 400,
   /**
    * 硬上限。连续说话时靠它兜底，切得越碎越容易切在句子中间。
    * 实时感由"临时结果"负责，所以这里可以放宽。
    */
-  maxChunkMs: 15000,
+  maxChunkMs: 8000,
   /** 一段超过这么久之后，遇到 350ms 的短停顿就切（逗号级停顿，不会劈开词组） */
-  midCutAfterMs: 4000,
-  midSilenceMs: 250,
+  midCutAfterMs: 2500,
+  midSilenceMs: 200,
   /** 边说边出的临时结果：每隔这么久把当前缓冲送一次识别 */
-  partialEveryMs: 1500,
+  partialEveryMs: 1200,
   /** 推理慢的机器（CPU）自动放宽到这个间隔，否则临时结果会占满算力 */
   partialEverySlowMs: 5000,
   /** 单次推理超过这个时间就算"慢机器" */
@@ -27,7 +27,7 @@ const LIVE = {
   /** 临时结果最多用多长的音频（越长越慢，10 秒够覆盖一句话） */
   partialWindowMs: 8000,
   /** 至少要说这么久才值得送一次临时结果 */
-  partialMinMs: 1500,
+  partialMinMs: 900,
   calibrateMs: 1200,
   /** 阈值下限：防数字静音误触发，但别设太高（实测底噪 0.0005 时 0.008 会吃掉小声） */
   /** 句首回卷：触发时把前面这段也带上，避免切掉第一个字或被重复解码 */
@@ -80,7 +80,7 @@ const state = {
   /** 麦克风诊断信息（设备名 / 采样率） */
   audioInfo: '',
   /** 临时结果的间隔，按最近的推理耗时动态调整 */
-  partialEveryMs: 1500,
+  partialEveryMs: 1200,
   /** 最近几次推理耗时，用来算平均值 */
   inferenceSamples: [],
   lastInferenceMs: 0,
