@@ -15,9 +15,11 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const outDir = join(root, 'vendor', 'llama')
 const isWin = process.platform === 'win32'
 
-// Windows 用 Vulkan 构建：有显卡走 GPU，没有则自动回落 CPU
+// Windows 用纯 CPU 构建。
+// Vulkan 构建在这台机器上会让音频编码器产出无效特征（模型输出一串 G），
+// 且实测 Q8 模型在 CPU 上已有 ~100 token/s，GPU 收益不明显，不值得为此冒险。
 const asset = isWin
-  ? `llama-${BUILD}-bin-win-vulkan-x64.zip`
+  ? `llama-${BUILD}-bin-win-cpu-x64.zip`
   : `llama-${BUILD}-bin-macos-arm64.tar.gz`
 
 const mirrors = [

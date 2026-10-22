@@ -192,7 +192,7 @@ class Engine {
       '--port', String(this.port),
       '-c', '8192',
       '-t', String(Math.max(2, os.cpus().length)),
-      '-ngl', '99',
+      '-ngl', this.allowGpu === false ? '0' : '99',
       // 音频编码器固定放 CPU：mtmd 的音频支持还是实验特性，
       // 在 Vulkan 等后端上会产出无效特征，导致模型输出一串重复字符。
       '--no-mmproj-offload',
@@ -431,7 +431,20 @@ class Engine {
     this.lastUsedAt = Date.now()
     this.armIdle()
     const rawText = String(json.choices?.[0]?.message?.content ?? '')
-    this.log(`原始输出：${rawText.slice(0, 80)}`)
+    const degenerate = isDegenerate(rawText)
+    this.log(`原始输出：${rawText.slice(0, 80)}${degenerate ? '（判定为退化输出）' : ''}`)
+
+    if (degenerate) {
+      this.degenerateCount = (this.degenerateCount ?? 0) + 1
+      // 连续三次退化，说明这个后端在这台机器上算不对，切纯 CPU 重置
+      if (this.degenerateCount >= 3 && this.allowGpu !== false) {
+        this.log('连续退化输出，改用纯 CPU 重新加载模型')
+        this.allowGpu = false
+        this.kill('退化输出，切换纯 CPU')
+      }
+    } else {
+      this.degenerateCount = 0
+    }
     return {
       text: cleanAsrText(rawText),
       audioSeconds: Math.round(wav.length / 32) / 1000,
