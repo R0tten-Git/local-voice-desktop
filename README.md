@@ -89,6 +89,11 @@ xattr -dr com.apple.quarantine /Applications/LocalVoice.app
 
 ## 排障
 
+**Windows：报「页面文件太小，无法完成操作」(OS error 1455)**
+模型加载需要几 GB 的提交内存。打开「系统属性 → 高级 → 性能设置 → 高级 → 虚拟内存」，
+把分页文件调到 **8 GB 以上**（或选「系统管理的大小」并把初始值设大），然后重开应用。
+
+
 **启动后没有窗口，报 `Cannot read properties of undefined (reading 'whenReady')`**
 说明进程里带了 `ELECTRON_RUN_AS_NODE=1`，Electron 退化成了纯 Node：
 

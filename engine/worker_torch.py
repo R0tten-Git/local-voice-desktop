@@ -154,7 +154,28 @@ def main() -> int:
     log(f"设备 {device} · dtype {dtype}")
 
     processor = Qwen3ASRProcessor.from_pretrained(model_path)
-    model = Qwen3ASRForConditionalGeneration.from_pretrained(model_path, dtype=dtype)
+
+    def load(precision):
+        """low_cpu_mem_usage 避免加载时复制一份完整权重，Windows 上很关键。"""
+        return Qwen3ASRForConditionalGeneration.from_pretrained(
+            model_path, dtype=precision, low_cpu_mem_usage=True
+        )
+
+    try:
+        model = load(dtype)
+    except OSError as error:
+        text = str(error)
+        low_memory = "1455" in text or "paging file" in text.lower() or "页面文件" in text
+        if not low_memory:
+            raise
+        # Windows 分页文件太小时，float32 的峰值撑不住；换半精度只要一半内存
+        log("内存不足（页面文件太小），改用半精度重试 …")
+        try:
+            model = load(torch.bfloat16)
+        except OSError:
+            log("半精度也失败。请在 Windows「系统属性 → 高级 → 性能设置 → 高级 → 虚拟内存」")
+            log("把分页文件调到 8GB 以上，或关闭其他占用内存的程序后重试。")
+            raise
     model.to(device)
     model.eval()
 

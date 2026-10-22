@@ -260,7 +260,7 @@ class Engine {
     this.starting = undefined
     this.onReady = undefined
     this.buffer = ''
-    this.failAll(new Error('引擎已停止'))
+    this.failAll(new Error(`引擎已停止（${reason}）`))
     if (!child) return
     try {
       child.stdin.end()

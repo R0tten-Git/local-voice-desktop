@@ -495,6 +495,14 @@ function transcribe(samples) {
     })
     .catch((error) => {
       const text = String(error?.message ?? error)
+      // 内存不足导致的加载失败要明确告诉用户怎么处理
+      if (text.includes('1455') || text.includes('页面文件')) {
+        appendMessage(
+          '内存不足：Windows 的分页文件太小，模型加载失败。\n' +
+            '请在「系统属性 → 高级 → 性能设置 → 高级 → 虚拟内存」把分页文件调到 8GB 以上，然后重新打开应用。',
+        )
+        return
+      }
       // 引擎重启/切换模型时在途请求会被拒，这属于正常流程，不该刷红字
       if (text.includes('引擎已停止') || text.includes('引擎已退出') || text.includes('引擎不可用')) {
         state.notice = '引擎已重启，继续说话即可'
