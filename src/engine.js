@@ -77,8 +77,7 @@ class Engine {
   async ensure(modelPath) {
     if (!modelPath) throw new Error('未指定模型目录：先调用 ensure(modelPath) 或 engine:start')
     if (this.child && this.model !== modelPath) {
-      this.log(`切换模型：${path.basename(this.model ?? '')} → ${path.basename(modelPath)}`)
-      this.kill()
+      this.kill(`切换模型：${path.basename(this.model ?? '')} → ${path.basename(modelPath)}`)
     }
     if (this.child !== undefined && this.onReady === undefined) return
     if (this.starting === undefined) {
@@ -119,8 +118,7 @@ class Engine {
         this.onReady = undefined
         if (error) {
           this.starting = undefined
-          this.log(`引擎失败：${error.message}`)
-          this.kill()
+          this.kill(`启动失败：${error.message}`)
           reject(error)
         } else {
           this.armIdle()
@@ -204,8 +202,7 @@ class Engine {
       this.lastUsedAt &&
       now - this.lastUsedAt > WAKE_GAP_MS
     ) {
-      this.log('长时间空闲，视为刚唤醒，重启引擎')
-      this.kill()
+      this.kill('空闲超过 90 秒，视为刚唤醒')
     }
     try {
       const result = await this.attempt(wav, language, timeoutMs)
@@ -213,8 +210,7 @@ class Engine {
       return result
     } catch (error) {
       if (!isTransportFailure(error)) throw error
-      this.log(`传输层失败（${error.message}），重启后重试一次`)
-      this.kill()
+      this.kill(`传输层失败：${error.message}`)
       const result = await this.attempt(wav, language, timeoutMs)
       this.lastUsedAt = Date.now()
       return result
@@ -232,7 +228,7 @@ class Engine {
         this.log(`识别超时（${timeoutMs}ms）`)
         reject(new Error('识别超时'))
         // 只有连一条都不剩了才重启引擎，避免一次超时把别的请求一起判死
-        if (this.pending.size === 0) this.kill()
+        if (this.pending.size === 0) this.kill('最后一条请求超时')
       }, timeoutMs)
       this.pending.set(id, { resolve, reject, timer })
     })
@@ -245,14 +241,19 @@ class Engine {
     clearTimeout(this.idle)
     this.idle = setTimeout(() => {
       if (this.pending.size === 0 && this.child) {
-        this.log('空闲回收引擎')
-        this.kill()
+        this.kill('空闲 5 分钟回收')
       }
     }, IDLE_MS)
     this.idle.unref?.()
   }
 
-  kill() {
+  /**
+   * 停止引擎并拒绝在途请求。
+   * @param {string} reason - 谁触发停止，会写进日志（排查事故的关键）
+   */
+  kill(reason = '未说明') {
+    const inflight = this.pending.size
+    this.log(`停止引擎（原因：${reason}，在途请求 ${inflight} 个）`)
     clearTimeout(this.idle)
     const child = this.child
     this.child = undefined
