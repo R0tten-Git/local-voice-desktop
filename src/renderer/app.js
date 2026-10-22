@@ -797,6 +797,14 @@ api.onProgress((progress) => {
 
 let installingEnv = false
 
+// 引擎提示（例如"有显卡但 torch 是 CPU 版"）直接显示在底部
+api.onEngineLog?.((line) => {
+  if (line.includes('检测到 NVIDIA')) {
+    state.notice = '检测到显卡但 torch 是 CPU 版，装 CUDA 版可快 10 倍（见日志）'
+    render()
+  }
+})
+
 api.onEnvLog((line) => {
   el.envLog.classList.remove('hidden')
   el.envLog.textContent += `${line}\n`

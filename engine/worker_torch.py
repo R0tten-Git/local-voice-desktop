@@ -145,6 +145,14 @@ def main() -> int:
     from transformers import Qwen3ASRForConditionalGeneration, Qwen3ASRProcessor
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if device == "cpu":
+        import shutil as _shutil
+
+        if _shutil.which("nvidia-smi"):
+            log("检测到 NVIDIA 显卡，但当前 torch 是 CPU 版，正在用 CPU 推理")
+            log("装 CUDA 版可提速 10 倍以上（约 2.5GB，走阿里云镜像）：")
+            log('  uv pip install --force-reinstall "https://mirrors.aliyun.com/pytorch-wheels/cu124/torch-2.6.0%2Bcu124-cp312-cp312-win_amd64.whl"')
     if device == "cpu":
         # 默认线程数在 Windows 上常常只给一半，显式用满
         threads = os.cpu_count() or 4
@@ -206,6 +214,10 @@ def main() -> int:
     # 当成待转写内容原样吐出来，用户会看到"调优、转写、实时转写…"整行。
     # MLX 后端用的是解码期偏置，没有这个问题。
     prompt = None
+
+    if device == "cuda":
+        total = torch.cuda.get_device_properties(0).total_memory / 1e9
+        log(f"显存 {total:.1f} GB（1.7B 模型约需 4.5 GB，0.6B 约需 2 GB）")
 
     load_ms = int((time.time() - t0) * 1000)
     sys.stdout = proto

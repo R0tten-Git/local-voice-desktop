@@ -1,6 +1,6 @@
 {
   "name": "local-voice-desktop",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "private": false,
   "description": "Local, offline real-time speech-to-text for macOS and Windows — Qwen3-ASR, no cloud, no account.",
   "type": "commonjs",

@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('localVoice', {
   stop: () => ipcRenderer.invoke('engine:stop'),
   download: (modelId) => ipcRenderer.invoke('model:download', modelId),
   installEnv: () => ipcRenderer.invoke('env:install'),
+  onEngineLog: (callback) => {
+    const listener = (_event, line) => callback(line)
+    ipcRenderer.on('engine:log', listener)
+    return () => ipcRenderer.removeListener('engine:log', listener)
+  },
   onEnvLog: (callback) => {
     const listener = (_event, line) => callback(line)
     ipcRenderer.on('env:log', listener)
