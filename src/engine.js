@@ -191,8 +191,11 @@ class Engine {
       '--mmproj', path.join(modelPath, gguf.mmproj),
       '--port', String(this.port),
       '-c', '8192',
-      '-t', String(Math.max(2, Math.floor(os.cpus().length / 2))),
+      '-t', String(Math.max(2, os.cpus().length)),
       '-ngl', '99',
+      // 音频编码器固定放 CPU：mtmd 的音频支持还是实验特性，
+      // 在 Vulkan 等后端上会产出无效特征，导致模型输出一串重复字符。
+      '--no-mmproj-offload',
       '--no-webui',
     ]
     const child = spawn(exe, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: path.dirname(exe) })
