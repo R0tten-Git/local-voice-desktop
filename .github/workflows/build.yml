@@ -43,6 +43,14 @@ jobs:
           done
           python -m py_compile engine/worker.py engine/worker_torch.py
 
+      - name: Module smoke test
+        run: |
+          node -e "
+          const mods = ['./src/downloader.js','./src/engine.js','./src/bootstrap.js','./scripts/probe.js'];
+          for (const m of mods) { require(m); }
+          console.log('all main modules load');
+          "
+
       - name: Bundle uv and llama.cpp
         run: |
           node scripts/fetch-uv.mjs
