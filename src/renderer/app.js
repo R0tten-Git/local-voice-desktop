@@ -647,6 +647,12 @@ function appendMessage(text) {
 async function start() {
   state.notice = ''
   const modelId = el.model.value
+  if (!modelId) {
+    // 探测还没跑完时模型列表是空的，点了也不能开工
+    state.notice = '正在读取模型列表，请稍候再点'
+    render()
+    return
+  }
   el.state.textContent = '引擎加载中…'
   render()
   try {
@@ -929,6 +935,10 @@ async function startDownload() {
 async function init() {
   initTheme()
   initWave()
+  if (el.toggle) {
+    el.toggle.disabled = true
+    el.toggle.title = '正在读取模型列表…'
+  }
   if (state.lines.length === 0) showEmptyState()
   void checkCuda()
   state.probe = await api.probe()
@@ -954,6 +964,11 @@ async function init() {
       : 'Python + mlx-audio，约 300 MB'
   if (env?.venv) el.envPath.textContent = env.venv
   el.envBlock.classList.toggle('hidden', !envMissing)
+
+  if (el.toggle) {
+    el.toggle.disabled = options.length === 0
+    el.toggle.title = options.length > 0 ? '开始 / 暂停' : '没有可用模型'
+  }
 
   const missing = options.length > 0 && !installed.includes(el.model.value)
   // 环境没准备好时也要把面板露出来，否则用户看不到"安装环境"
