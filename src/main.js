@@ -347,6 +347,12 @@ ipcMain.handle('system:probe', async () => {
   return { ...result, installed: installed(), environment: bootstrap.status() }
 })
 
+ipcMain.handle('app:openExternal', async (_event, url) => {
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) throw new Error('只允许打开 http(s) 链接')
+  await shell.openExternal(url)
+  return true
+})
+
 ipcMain.handle('env:cuda-status', async () => {
   const [cuda, torch] = [await bootstrap.detectCuda(), bootstrap.torchCuda()]
   return { ...cuda, ...torch }

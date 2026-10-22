@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('localVoice', {
   download: (modelId) => ipcRenderer.invoke('model:download', modelId),
   installEnv: () => ipcRenderer.invoke('env:install'),
   cudaStatus: () => ipcRenderer.invoke('env:cuda-status'),
+  openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   installCuda: () => ipcRenderer.invoke('env:install-cuda'),
   onCudaProgress: (callback) => {
     const listener = (_event, progress) => callback(progress)

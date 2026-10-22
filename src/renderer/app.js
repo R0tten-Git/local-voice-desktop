@@ -831,11 +831,23 @@ async function checkCuda() {
   try {
     const info = await api.cudaStatus()
     // 只有真的装了显卡、但 torch 不是 CUDA 版时才提示
+    // 探针能认出 N 卡但 nvidia-smi 不存在 → 驱动没装
+    const vendor = state.probe?.gpuVendor
+    if (vendor === 'nvidia' && info.hasNvidia !== true) {
+      el.gpuBanner.classList.remove('hidden')
+      el.gpuTitle.textContent = `检测到 ${state.probe.gpuName ?? 'NVIDIA 显卡'}，但显卡驱动没装`
+      el.gpuHint.textContent = '先到 nvidia.cn 装对应驱动并重启，之后就能启用 GPU 加速'
+      el.gpuInstall.textContent = '打开驱动下载页'
+      el.gpuInstall.disabled = false
+      el.gpuInstall.dataset.action = 'driver'
+      return
+    }
     if (info.hasNvidia === true && info.available !== true) {
       el.gpuBanner.classList.remove('hidden')
       el.gpuTitle.textContent = `检测到 ${info.name ?? 'NVIDIA 显卡'}，但正在用 CPU 推理`
       el.gpuHint.textContent = `装 CUDA 版 torch 可快 10 倍以上（约 2.5 GB，按驱动 CUDA ${info.driverCuda ?? '?'} 选择）`
       el.gpuInstall.disabled = false
+      el.gpuInstall.dataset.action = 'cuda'
     } else {
       el.gpuBanner.classList.add('hidden')
     }
@@ -996,7 +1008,13 @@ el.copyCmd.addEventListener('click', () => {
 el.openModels.addEventListener('click', () => void api.openModelsFolder())
 el.download.addEventListener('click', () => void startDownload())
 el.installEnv.addEventListener('click', () => void installEnvironment())
-el.gpuInstall.addEventListener('click', () => void installCuda())
+el.gpuInstall.addEventListener('click', () => {
+  if (el.gpuInstall.dataset.action === 'driver') {
+    void api.openExternal('https://www.nvidia.cn/Download/index.aspx')
+    return
+  }
+  void installCuda()
+})
 el.model.addEventListener('change', async () => {
   // 切换模型会重建引擎；如果正在录音，先把会话停干净再切，免得在途请求被拒
   if (state.phase === 'recording') {

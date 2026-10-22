@@ -158,7 +158,19 @@ def main() -> int:
         threads = os.cpu_count() or 4
         torch.set_num_threads(threads)
         log(f"CPU 线程数 {threads}")
-    dtype = torch.bfloat16 if device == "cuda" else torch.float32
+    if device == "cuda":
+        major, minor = torch.cuda.get_device_capability(0)
+        # bf16 从 Ampere（8.0）开始原生支持；Turing（7.x）用 fp16；
+        # Pascal（6.x，如 GTX 1060）fp16 只有 1/64 吞吐，用 fp32 最快。
+        if major >= 8:
+            dtype = torch.bfloat16
+        elif major == 7:
+            dtype = torch.float16
+        else:
+            dtype = torch.float32
+        log(f"显卡算力 {major}.{minor} → dtype {dtype}")
+    else:
+        dtype = torch.float32
     log(f"设备 {device} · dtype {dtype}")
 
     processor = Qwen3ASRProcessor.from_pretrained(model_path)
