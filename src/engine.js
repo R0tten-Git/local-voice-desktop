@@ -47,6 +47,36 @@ function freePort() {
   })
 }
 
+/** 把最近的音频片段留样，方便事后核对送进去的到底是什么。 */
+const CHUNK_DIR = path.join(os.homedir(), 'Library', 'Logs', 'localvoice-chunks')
+let chunkSeq = 0
+
+function dumpChunk(wav) {
+  try {
+    fs.mkdirSync(CHUNK_DIR, { recursive: true })
+    chunkSeq = (chunkSeq + 1) % 5
+    fs.writeFileSync(path.join(CHUNK_DIR, `chunk-${chunkSeq}.wav`), wav)
+  } catch {
+    /* 留样失败不影响主流程 */
+  }
+}
+
+/** 从 WAV 里取时长与峰值，写进日志。 */
+function wavStats(wav) {
+  try {
+    const declaredRate = wav.readUInt32LE(24)
+    const samples = Math.floor((wav.length - 44) / 2)
+    let peak = 0
+    for (let i = 44; i + 1 < wav.length; i += 2) {
+      const v = Math.abs(wav.readInt16LE(i))
+      if (v > peak) peak = v
+    }
+    return { seconds: samples / declaredRate, peak: peak / 32768, rate: declaredRate }
+  } catch {
+    return { seconds: 0, peak: 0, rate: 0 }
+  }
+}
+
 /** 判断是不是模型退化输出（同一字符刷屏）。 */
 function isDegenerate(text) {
   if (text.length < 12) return false
@@ -369,6 +399,11 @@ class Engine {
   async attemptLlama(wav, timeoutMs) {
     if (!this.child || this.port === undefined) throw new Error('引擎不可用')
     const started = Date.now()
+    const stats = wavStats(wav)
+    dumpChunk(wav)
+    this.log(
+      `音频 ${stats.seconds.toFixed(1)}s · ${stats.rate}Hz · 峰值 ${stats.peak.toFixed(3)}`,
+    )
     const payload = {
       messages: [
         {
@@ -392,8 +427,10 @@ class Engine {
     const json = await response.json()
     this.lastUsedAt = Date.now()
     this.armIdle()
+    const rawText = String(json.choices?.[0]?.message?.content ?? '')
+    this.log(`原始输出：${rawText.slice(0, 80)}`)
     return {
-      text: cleanAsrText(json.choices?.[0]?.message?.content),
+      text: cleanAsrText(rawText),
       audioSeconds: Math.round(wav.length / 32) / 1000,
       inferenceSeconds: (Date.now() - started) / 1000,
     }
