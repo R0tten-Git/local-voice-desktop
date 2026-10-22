@@ -184,7 +184,7 @@ class Engine {
     this.mode = 'llama'
     this.model = modelPath
     this.port = await freePort()
-    this.log(`启动 llama-server：${exe} --port ${this.port}`)
+    this.log(`启动 llama-server：${exe} --port ${this.port}（ngl=${this.allowGpu === false ? 0 : 99}，mmproj 走 CPU）`)
 
     const args = [
       '-m', path.join(modelPath, gguf.model),

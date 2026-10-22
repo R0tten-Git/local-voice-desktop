@@ -253,6 +253,8 @@ app.whenReady().then(() => {
     nativeTheme.themeSource = process.env.LOCALVOICE_SNAPSHOT_THEME
   }
 
+  logLine(`启动 LocalVoice ${app.getVersion()} · ${process.platform}/${process.arch}`)
+
   createWindow()
   createTray()
 
