@@ -13,6 +13,7 @@
  *  · 传输层失败自动重启重试一次。
  */
 const { spawn } = require('node:child_process')
+const net = require('node:net')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -21,6 +22,38 @@ const READY_TIMEOUT_MS = 180_000
 const REQUEST_TIMEOUT_MS = 30_000
 const IDLE_MS = 300_000
 const WAKE_GAP_MS = 90_000
+
+/** llama-server 可执行文件：优先用打包进来的。 */
+function llamaBinary() {
+  const name = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server'
+  const candidates = [
+    path.join(process.resourcesPath ?? '', 'llama', name),
+    path.join(__dirname, '..', 'vendor', 'llama', name),
+    path.join(__dirname, '..', 'llama-test', `llama-b11804`, name),
+  ]
+  return candidates.find((p) => fs.existsSync(p))
+}
+
+/** 找一个空闲端口。 */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.unref()
+    server.on('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      server.close(() => resolve(port))
+    })
+  })
+}
+
+/** 去掉 llama.cpp 输出的 "language Chinese<asr_text>" 前缀。 */
+function cleanAsrText(raw) {
+  let text = String(raw ?? '').trim()
+  if (text.includes('<asr_text>')) text = text.split('<asr_text>').pop()
+  text = text.replace(/^language\s+\w+\s*/i, '')
+  return text.trim()
+}
 
 /**
  * Apple Silicon 用 MLX 版 worker，其余平台用 torch 版。
@@ -74,15 +107,17 @@ class Engine {
   }
 
   /** 启动（或确认已启动）引擎。 */
-  async ensure(modelPath) {
+  async ensure(modelPath, gguf) {
     if (!modelPath) throw new Error('未指定模型目录：先调用 ensure(modelPath) 或 engine:start')
-    if (this.child && this.model !== modelPath) {
+    if (this.child && (this.model !== modelPath || this.ggufKey !== JSON.stringify(gguf ?? null))) {
       this.kill(`切换模型：${path.basename(this.model ?? '')} → ${path.basename(modelPath)}`)
     }
     if (this.child !== undefined && this.onReady === undefined) return
     if (this.starting === undefined) {
       this.model = modelPath
-      this.starting = this.start(modelPath).catch((error) => {
+      this.gguf = gguf
+      this.ggufKey = JSON.stringify(gguf ?? null)
+      this.starting = this.start(modelPath, gguf).catch((error) => {
         this.starting = undefined
         throw error
       })
@@ -91,7 +126,75 @@ class Engine {
   }
 
   /** 拉起子进程并等 ready。 */
-  start(modelPath) {
+  /**
+   * 启动引擎。gguf 存在时走 llama.cpp，否则走 Python worker。
+   * @param {string} modelPath 模型目录
+   * @param {{model:string, mmproj:string}} [gguf] GGUF 文件名
+   */
+  async start(modelPath, gguf) {
+    if (gguf !== undefined) return this.startLlama(modelPath, gguf)
+    return this.startPython(modelPath)
+  }
+
+  /** llama.cpp 后端：常驻 llama-server，走 OpenAI 兼容 HTTP。 */
+  async startLlama(modelPath, gguf) {
+    const exe = llamaBinary()
+    if (!exe) throw new Error('缺少 llama-server（安装包不完整）')
+    this.mode = 'llama'
+    this.model = modelPath
+    this.port = await freePort()
+    this.log(`启动 llama-server：${exe} --port ${this.port}`)
+
+    const args = [
+      '-m', path.join(modelPath, gguf.model),
+      '--mmproj', path.join(modelPath, gguf.mmproj),
+      '--port', String(this.port),
+      '-c', '8192',
+      '-t', String(Math.max(2, Math.floor(os.cpus().length / 2))),
+      '-ngl', '99',
+      '--no-webui',
+    ]
+    const child = spawn(exe, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: path.dirname(exe) })
+    this.child = child
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    for (const stream of [child.stdout, child.stderr]) {
+      stream.on('data', (chunk) => {
+        for (const line of String(chunk).split('\n')) {
+          const text = line.trim()
+          if (text && /error|loaded|listening|audio/i.test(text)) this.log(text.slice(0, 200))
+        }
+      })
+    }
+    child.on('exit', (code) => {
+      this.failAll(new Error(`llama-server 退出（code=${code}）`))
+      this.child = undefined
+    })
+
+    // 等 /health 通过
+    const started = Date.now()
+    for (let i = 0; i < 240; i += 1) {
+      if (!this.child) throw new Error('llama-server 启动失败')
+      try {
+        const response = await fetch(`http://127.0.0.1:${this.port}/health`, {
+          signal: AbortSignal.timeout(2000),
+        })
+        if (response.ok) {
+          this.log(`llama-server 就绪（${Date.now() - started}ms）`)
+          this.armIdle()
+          return
+        }
+      } catch {
+        /* 继续等 */
+      }
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    this.kill('llama-server 启动超时')
+    throw new Error('llama-server 启动超时')
+  }
+
+  startPython(modelPath) {
+    this.mode = 'python'
     return new Promise((resolve, reject) => {
       const python = findPython()
       const script = workerScript()
@@ -224,7 +327,8 @@ class Engine {
   }
 
   async attempt(wav, language, timeoutMs = REQUEST_TIMEOUT_MS) {
-    await this.ensure(this.model)
+    if (this.mode === 'llama') return this.attemptLlama(wav, timeoutMs)
+    await this.ensure(this.model, this.gguf)
     const child = this.child
     if (!child) throw new Error('引擎不可用')
     const id = ++this.seq
@@ -241,6 +345,37 @@ class Engine {
     child.stdin.write(`${JSON.stringify({ id, wav: wav.toString('base64'), language })}\n`)
     this.armIdle()
     return await result
+  }
+
+  /** 一次 llama.cpp 转写：音频以 base64 传给 /v1/chat/completions。 */
+  async attemptLlama(wav, timeoutMs) {
+    if (!this.child || this.port === undefined) throw new Error('引擎不可用')
+    const started = Date.now()
+    const payload = {
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'input_audio', input_audio: { data: wav.toString('base64'), format: 'wav' } }],
+        },
+      ],
+      temperature: 0,
+      max_tokens: 256,
+    }
+    const response = await fetch(`http://127.0.0.1:${this.port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (!response.ok) throw new Error(`llama-server HTTP ${response.status}`)
+    const json = await response.json()
+    this.lastUsedAt = Date.now()
+    this.armIdle()
+    return {
+      text: cleanAsrText(json.choices?.[0]?.message?.content),
+      audioSeconds: Math.round(wav.length / 32) / 1000,
+      inferenceSeconds: (Date.now() - started) / 1000,
+    }
   }
 
   armIdle() {
@@ -269,7 +404,7 @@ class Engine {
     this.failAll(new Error(`引擎已停止（${reason}）`))
     if (!child) return
     try {
-      child.stdin.end()
+      if (this.mode !== 'llama') child.stdin.end()
       child.kill('SIGTERM')
       setTimeout(() => {
         try {

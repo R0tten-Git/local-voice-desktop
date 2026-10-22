@@ -1,6 +1,6 @@
 {
   "name": "local-voice-desktop",
-  "version": "0.9.4",
+  "version": "0.10.0",
   "private": false,
   "description": "Local, offline real-time speech-to-text for macOS and Windows — Qwen3-ASR, no cloud, no account.",
   "type": "commonjs",
@@ -20,8 +20,8 @@
     "probe": "node scripts/probe.js",
     "build:mac": "electron-builder --mac --arm64 --publish never",
     "build:win": "electron-builder --win --x64 --publish never",
-    "prebuild:mac": "node scripts/fetch-uv.mjs",
-    "prebuild:win": "node scripts/fetch-uv.mjs"
+    "prebuild:mac": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs",
+    "prebuild:win": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -45,6 +45,10 @@
       {
         "from": "vendor/uv",
         "to": "uv"
+      },
+      {
+        "from": "vendor/llama",
+        "to": "llama"
       }
     ],
     "mac": {

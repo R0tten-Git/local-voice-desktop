@@ -17,12 +17,15 @@
 
 ## 平台
 
-| 平台 | 后端 | 模型 | 状态 |
+| 平台 | 默认后端 | 模型 | 状态 |
 |---|---|---|---|
-| macOS Apple Silicon | MLX | MLX 量化版（0.7 / 1.6 / 2.5 GB） | ✅ 已验证 |
-| Windows + NVIDIA | torch + CUDA | HF 格式（1.6 / 4.1 GB） | 🟡 代码就绪，CI 构建中 |
-| Windows 无独显 | torch + CPU | HF 格式 0.6B（1.6 GB） | 🟡 同上 |
-| Intel Mac | torch + CPU | HF 格式 | 🟡 同上 |
+| macOS Apple Silicon | **MLX** | MLX 量化版（0.7 / 1.6 / 2.5 GB） | ✅ 0.5 秒/句 |
+| Windows（有/无显卡） | **llama.cpp** | GGUF Q8（1.0 / 2.5 GB） | ✅ 0.3–0.7 秒/句 |
+| Intel Mac / Linux | **llama.cpp** | GGUF Q8 | ✅ 同上 |
+| Windows 备选 | torch + CUDA | HF 格式 | 🟡 显存 ≥3 GB 时可用 |
+
+llama.cpp 的二进制**已打进安装包**，模型走魔搭下载，不需要用户装 Python 或编译任何东西。
+GGUF Q8 显存占用只有约 1 GB（0.6B），比 torch 全精度省一半以上。
 
 ## 断句策略
 

@@ -57,6 +57,14 @@ const MODELS = [
   {
     id: 'qwen3-asr-1.7b-gguf-q8',
     repo: 'ggml-org/Qwen3-ASR-1.7B-GGUF',
+    gguf: {
+      model: 'Qwen3-ASR-1.7B-Q8_0.gguf',
+      mmproj: 'mmproj-Qwen3-ASR-1.7B-Q8_0.gguf',
+    },
+    include: [
+      'Qwen3-ASR-1.7B-Q8_0.gguf',
+      'mmproj-Qwen3-ASR-1.7B-Q8_0.gguf',
+    ],
     label: 'Qwen3-ASR 1.7B · GGUF Q8',
     sizeGb: 2.53,
     rssGb: 2.8,
@@ -92,7 +100,15 @@ const MODELS = [
   },
   {
     id: 'qwen3-asr-0.6b-gguf-q8',
-    repo: 'unslothai/Qwen3-ASR-0.6B-GGUF',
+    repo: 'ggml-org/Qwen3-ASR-0.6B-GGUF',
+    gguf: {
+      model: 'Qwen3-ASR-0.6B-Q8_0.gguf',
+      mmproj: 'mmproj-Qwen3-ASR-0.6B-Q8_0.gguf',
+    },
+    include: [
+      'Qwen3-ASR-0.6B-Q8_0.gguf',
+      'mmproj-Qwen3-ASR-0.6B-Q8_0.gguf',
+    ],
     label: 'Qwen3-ASR 0.6B · GGUF Q8',
     sizeGb: 1.01,
     rssGb: 1.1,
@@ -180,20 +196,31 @@ async function probe() {
    * 其他平台（Windows / Intel Mac / Linux）用 torch + transformers，
    * 官方 HF 权重在两个平台是同一套，质量一致。
    */
-  const backend = platform === 'darwin' && arch === 'arm64' ? 'mlx' : 'torch'
+  /**
+   * 每个平台可用的后端，第一个是首选：
+   * - Apple Silicon：MLX 最快（原生、内存省），llama.cpp 作为备选
+   * - Windows / Linux / Intel Mac：llama.cpp 优先（GGUF 量化，CPU/GPU 都能跑，
+   *   显存占用远小于 torch 全精度），torch 作为备选
+   */
+  const backends =
+    platform === 'darwin' && arch === 'arm64' ? ['mlx', 'llama.cpp'] : ['llama.cpp', 'torch']
+  const backend = backends[0]
 
-  const candidates = MODELS.filter((m) => m.backends.includes(backend))
+  const candidates = MODELS.filter((m) => m.backends.some((b) => backends.includes(b)))
   /** 内存要留一半给系统和应用本身，这是经验值。 */
   const usable = totalRamGb * 0.5
   const fits = candidates.filter((m) => m.rssGb <= usable && (diskGb === undefined || m.sizeGb + 2 < diskGb))
 
   // 不是"越准越好"：实测 1.7B-4bit 比 8bit 只差 0.38%，却快 26%、省 800MB。
   // 所以默认给 balanced（性价比档），max 档留给用户在界面上手动选。
-  const byTier = (tier) => fits.filter((m) => m.tier === tier).sort((a, b) => b.accuracy - a.accuracy)[0]
+  const onPrimary = fits.filter((m) => m.backends.includes(backend))
+  const pool = onPrimary.length > 0 ? onPrimary : fits
+  const byTier = (tier) => pool.filter((m) => m.tier === tier).sort((a, b) => b.accuracy - a.accuracy)[0]
   const recommended =
     byTier('balanced') ??
     byTier('fallback') ??
-    candidates.sort((a, b) => a.rssGb - b.rssGb)[0]
+    pool.sort((a, b) => a.rssGb - b.rssGb)[0] ??
+    candidates[0]
 
   return {
     platform,

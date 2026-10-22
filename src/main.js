@@ -401,7 +401,7 @@ ipcMain.handle('engine:start', async (_event, modelId) => {
   const dir = modelDir(model.repo)
   if (!fs.existsSync(dir)) throw new Error(`模型未下载：${dir}`)
   const started = Date.now()
-  await engine.ensure(dir)
+  await engine.ensure(dir, model.gguf)
   return { modelId, modelPath: dir, loadMs: Date.now() - started }
 })
 
@@ -430,9 +430,14 @@ ipcMain.handle('model:download', async (_event, modelId) => {
   const dest = modelDir(model.repo)
   downloading = modelId
   try {
-    const result = await downloadModel(model.repo, dest, (progress) => {
-      window?.webContents.send('model:progress', { modelId, ...progress })
-    })
+    const result = await downloadModel(
+      model.repo,
+      dest,
+      (progress) => {
+        window?.webContents.send('model:progress', { modelId, ...progress })
+      },
+      model.include,
+    )
     return { ...result, modelId }
   } finally {
     downloading = undefined
