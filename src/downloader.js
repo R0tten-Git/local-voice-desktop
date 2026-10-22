@@ -124,4 +124,42 @@ async function downloadModel(repo, destRoot, onProgress = () => {}, include) {
   return { path: destRoot, bytes: doneBytes }
 }
 
-module.exports = { downloadModel, listFiles, downloadFile }
+/**
+ * 下载单个 URL 到本地文件，支持断点续传。
+ * @param {string} url
+ * @param {string} dest 目标文件路径
+ * @param {(info: {doneBytes:number,totalBytes:number,speed:number}) => void} onProgress
+ */
+async function downloadUrl(url, dest, onProgress = () => {}) {
+  await fsp.mkdir(path.dirname(dest), { recursive: true })
+  const part = `${dest}.part`
+  let offset = fs.existsSync(part) ? fs.statSync(part).size : 0
+
+  const headers = { 'user-agent': 'local-voice-desktop' }
+  if (offset > 0) headers.Range = `bytes=${offset}-`
+  const response = await fetch(url, { headers, redirect: 'follow', signal: AbortSignal.timeout(30 * 60_000) })
+  if (!response.ok && response.status !== 206) throw new Error(`下载失败 HTTP ${response.status}`)
+
+  // 续传时服务器可能返回整份文件，需要从头写
+  if (offset > 0 && response.status === 200) offset = 0
+
+  const total = Number(response.headers.get('content-length') ?? 0) + offset
+  const handle = fs.createWriteStream(part, { flags: offset > 0 ? 'a' : 'w' })
+  let done = offset
+  const started = Date.now()
+  const source = Readable.fromWeb(response.body)
+  source.on('data', (chunk) => {
+    done += chunk.length
+    const seconds = (Date.now() - started) / 1000
+    onProgress({
+      doneBytes: done,
+      totalBytes: total,
+      speed: seconds > 0 ? Math.round((done - offset) / seconds) : 0,
+    })
+  })
+  await pipeline(source, handle)
+  await fsp.rename(part, dest)
+  return { path: dest, bytes: done }
+}
+
+module.exports = { downloadModel, listFiles, downloadFile, downloadUrl }

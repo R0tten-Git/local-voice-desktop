@@ -47,6 +47,12 @@ const el = {
   envBlock: document.getElementById('envBlock'),
   installEnv: document.getElementById('installEnv'),
   envLog: document.getElementById('envLog'),
+  gpuBanner: document.getElementById('gpuBanner'),
+  gpuTitle: document.getElementById('gpuTitle'),
+  gpuHint: document.getElementById('gpuHint'),
+  gpuBar: document.getElementById('gpuBar'),
+  gpuFill: document.getElementById('gpuFill'),
+  gpuInstall: document.getElementById('gpuInstall'),
   envSize: document.getElementById('envSize'),
   envPath: document.getElementById('envPath'),
   bar: document.getElementById('bar'),
@@ -811,6 +817,56 @@ api.onEnvLog((line) => {
   el.envLog.scrollTop = el.envLog.scrollHeight
 })
 
+let installingCuda = false
+
+api.onCudaProgress((progress) => {
+  const pct = progress.totalBytes > 0 ? (progress.doneBytes / progress.totalBytes) * 100 : 0
+  el.gpuBar.classList.remove('hidden')
+  el.gpuFill.style.width = `${pct.toFixed(1)}%`
+  const speed = progress.speed ? ` · ${human(progress.speed)}/s` : ''
+  el.gpuHint.textContent = `${human(progress.doneBytes)} / ${human(progress.totalBytes)} · ${pct.toFixed(0)}%${speed}`
+})
+
+async function checkCuda() {
+  try {
+    const info = await api.cudaStatus()
+    // 只有真的装了显卡、但 torch 不是 CUDA 版时才提示
+    if (info.hasNvidia === true && info.available !== true) {
+      el.gpuBanner.classList.remove('hidden')
+      el.gpuTitle.textContent = `检测到 ${info.name ?? 'NVIDIA 显卡'}，但正在用 CPU 推理`
+      el.gpuHint.textContent = `装 CUDA 版 torch 可快 10 倍以上（约 2.5 GB，按驱动 CUDA ${info.driverCuda ?? '?'} 选择）`
+      el.gpuInstall.disabled = false
+    } else {
+      el.gpuBanner.classList.add('hidden')
+    }
+  } catch {
+    /* 检测失败就当没有显卡，不打扰 */
+  }
+}
+
+async function installCuda() {
+  if (installingCuda) return
+  installingCuda = true
+  el.gpuInstall.disabled = true
+  el.gpuInstall.textContent = '安装中…'
+  el.gpuBar.classList.remove('hidden')
+  try {
+    const result = await api.installCuda()
+    el.gpuFill.style.width = '100%'
+    el.gpuTitle.textContent = result.verified ? 'GPU 加速已启用，请重启应用生效' : '安装完成但 CUDA 不可用'
+    el.gpuHint.textContent = result.verified
+      ? '重启 LocalVoice 后会自动使用显卡'
+      : '驱动可能太旧，运行 nvidia-smi 查看支持的 CUDA 版本'
+    el.gpuInstall.textContent = result.verified ? '已启用' : '重试'
+  } catch (error) {
+    el.gpuHint.textContent = `安装失败：${error.message ?? error}`
+    el.gpuInstall.textContent = '重试'
+    el.gpuInstall.disabled = false
+  } finally {
+    installingCuda = false
+  }
+}
+
 async function installEnvironment() {
   if (installingEnv) return
   installingEnv = true
@@ -862,6 +918,7 @@ async function init() {
   initTheme()
   initWave()
   if (state.lines.length === 0) showEmptyState()
+  void checkCuda()
   state.probe = await api.probe()
   document.body.classList.add(`platform-${state.probe.platform}`)
   const { options, recommended, installed, backend, totalRamGb, gpuName } = state.probe
@@ -939,6 +996,7 @@ el.copyCmd.addEventListener('click', () => {
 el.openModels.addEventListener('click', () => void api.openModelsFolder())
 el.download.addEventListener('click', () => void startDownload())
 el.installEnv.addEventListener('click', () => void installEnvironment())
+el.gpuInstall.addEventListener('click', () => void installCuda())
 el.model.addEventListener('change', async () => {
   // 切换模型会重建引擎；如果正在录音，先把会话停干净再切，免得在途请求被拒
   if (state.phase === 'recording') {

@@ -61,6 +61,15 @@
 
     <main id="transcript" class="transcript" aria-live="polite"></main>
 
+    <div id="gpuBanner" class="banner hidden">
+      <div class="banner-body">
+        <strong id="gpuTitle">检测到显卡，但正在用 CPU 推理</strong>
+        <span id="gpuHint" class="banner-hint">装 CUDA 版 torch 可快 10 倍以上</span>
+        <div class="banner-bar hidden" id="gpuBar"><div class="banner-fill" id="gpuFill"></div></div>
+      </div>
+      <button id="gpuInstall" class="solid">启用 GPU 加速</button>
+    </div>
+
     <div class="dock">
       <button id="toggle" class="rec" title="开始录音" aria-label="开始录音">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">

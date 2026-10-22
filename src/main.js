@@ -320,6 +320,7 @@ app.whenReady().then(() => {
         }
         const image = await window.webContents.capturePage()
         fs.writeFileSync(process.env.LOCALVOICE_SNAPSHOT, image.toPNG())
+        closing = true // 截图工具不弹"要保存吗"
         app.quit()
       }, process.env.LOCALVOICE_SNAPSHOT_DEMO ? 5200 : 2500)
     })
@@ -344,6 +345,26 @@ app.on('before-quit', () => engine.kill())
 ipcMain.handle('system:probe', async () => {
   const result = await probe()
   return { ...result, installed: installed(), environment: bootstrap.status() }
+})
+
+ipcMain.handle('env:cuda-status', async () => {
+  const [cuda, torch] = [await bootstrap.detectCuda(), bootstrap.torchCuda()]
+  return { ...cuda, ...torch }
+})
+
+let installingCuda = false
+
+ipcMain.handle('env:install-cuda', async () => {
+  if (installingCuda) throw new Error('GPU 加速包正在安装')
+  installingCuda = true
+  try {
+    return await bootstrap.installCudaTorch(
+      (line) => window?.webContents.send('env:log', line),
+      (progress) => window?.webContents.send('cuda:progress', progress),
+    )
+  } finally {
+    installingCuda = false
+  }
 })
 
 /** 环境安装：同一时间只跑一个 */

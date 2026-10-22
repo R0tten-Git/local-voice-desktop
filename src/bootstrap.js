@@ -176,6 +176,53 @@ async function hasNvidia() {
   }
 }
 
+/** 查有没有 NVIDIA 显卡和驱动支持的 CUDA 版本。 */
+async function detectCuda() {
+  if (process.platform !== 'win32' && process.platform !== 'linux') {
+    return { hasNvidia: false }
+  }
+  try {
+    const out = await run('nvidia-smi', [], () => {}, 10_000)
+    const version = /CUDA Version:\s*([0-9.]+)/.exec(out)?.[1]
+    const name = /NVIDIA[-\s\w]*?(GeForce[^\n]*|RTX[^\n]*|Quadro[^\n]*)/.exec(out)?.[1]?.trim()
+    return { hasNvidia: true, driverCuda: version, name }
+  } catch {
+    return { hasNvidia: false }
+  }
+}
+
+/** 当前 venv 里的 torch 是不是 CUDA 版。 */
+function torchCuda() {
+  if (!fs.existsSync(VENV_PYTHON)) return { torchCuda: undefined, installed: false }
+  try {
+    const { spawnSync } = require('node:child_process')
+    const probe = spawnSync(
+      VENV_PYTHON,
+      ['-c', 'import torch;print(torch.version.cuda or "", torch.cuda.is_available())'],
+      { timeout: 60_000, encoding: 'utf8' },
+    )
+    if (probe.status !== 0) return { torchCuda: undefined, installed: false }
+    const [version, available] = (probe.stdout ?? '').trim().split(/\s+/)
+    return { torchCuda: version || '', available: available === 'True', installed: true }
+  } catch {
+    return { torchCuda: undefined, installed: false }
+  }
+}
+
+/** 阿里云 pytorch-wheels 镜像。 */
+const TORCH_MIRROR = 'https://mirrors.aliyun.com/pytorch-wheels'
+
+/** 按驱动支持的 CUDA 版本挑一个能用的 wheel。 */
+function pickTorchWheel(driverCuda) {
+  const major = Number.parseFloat(driverCuda ?? '0')
+  // cu124 需要驱动 >= 12.4
+  const cuda = major >= 12.4 ? 'cu124' : major >= 12.1 ? 'cu121' : 'cu118'
+  return {
+    cuda,
+    url: `${TORCH_MIRROR}/${cuda}/torch-2.6.0%2B${cuda}-cp312-cp312-win_amd64.whl`,
+  }
+}
+
 /** 跑一个命令，把输出逐行回传。 */
 function run(command, args, onLog, timeoutMs = 600_000) {
   return new Promise((resolve, reject) => {
@@ -300,4 +347,48 @@ async function install(onLog = () => {}) {
   return status()
 }
 
-module.exports = { status, install, VENV_PYTHON, UV, BACKEND, detectPython }
+/**
+ * 装 CUDA 版 torch：先下载 wheel（可续传），再用 uv 装进去。
+ * @param {(line:string)=>void} onLog
+ * @param {(p:{doneBytes:number,totalBytes:number,speed:number})=>void} onProgress
+ */
+async function installCudaTorch(onLog = () => {}, onProgress = () => {}) {
+  const cuda = await detectCuda()
+  if (!cuda.hasNvidia) throw new Error('没有检测到 NVIDIA 显卡')
+
+  const wheel = pickTorchWheel(cuda.driverCuda)
+  const cacheDir = path.join(HOME, '.local', 'cache')
+  const dest = path.join(cacheDir, `torch-${wheel.cuda}.whl`)
+  onLog(`显卡：${cuda.name ?? 'NVIDIA'} · 驱动 CUDA ${cuda.driverCuda ?? '未知'} → 使用 ${wheel.cuda}`)
+
+  if (fs.existsSync(dest)) {
+    onLog('wheel 已存在，跳过下载')
+  } else {
+    onLog(`下载 CUDA 版 torch（约 2.5GB）：${wheel.url}`)
+    const { downloadUrl } = require('./downloader')
+    await downloadUrl(wheel.url, dest, onProgress)
+    onLog('下载完成，开始安装')
+  }
+
+  await run(UV, ['pip', 'install', '--python', VENV_PYTHON, '--no-deps', '--force-reinstall', dest], onLog)
+  onLog('安装完成，校验…')
+  const check = await run(
+    VENV_PYTHON,
+    ['-c', 'import torch;print(torch.__version__, torch.cuda.is_available())'],
+    onLog,
+  )
+  onLog(String(check).trim())
+  return { cuda: wheel.cuda, verified: /True/.test(String(check)) }
+}
+
+module.exports = {
+  status,
+  install,
+  VENV_PYTHON,
+  UV,
+  BACKEND,
+  detectPython,
+  detectCuda,
+  torchCuda,
+  installCudaTorch,
+}
