@@ -47,12 +47,23 @@ function freePort() {
   })
 }
 
+/** 判断是不是模型退化输出（同一字符刷屏）。 */
+function isDegenerate(text) {
+  if (text.length < 12) return false
+  // 某个字符连续出现 8 次以上
+  if (/(.)\1{7,}/u.test(text)) return true
+  // 字符种类极少但长度不短
+  const unique = new Set(text.replace(/[\s，。、,.!?！？]/gu, '')).size
+  return unique > 0 && unique <= 3 && text.length > 20
+}
+
 /** 去掉 llama.cpp 输出的 "language Chinese<asr_text>" 前缀。 */
 function cleanAsrText(raw) {
   let text = String(raw ?? '').trim()
   if (text.includes('<asr_text>')) text = text.split('<asr_text>').pop()
   text = text.replace(/^language\s+\w+\s*/i, '')
-  return text.trim()
+  text = text.trim()
+  return isDegenerate(text) ? '' : text
 }
 
 /**
@@ -366,7 +377,10 @@ class Engine {
         },
       ],
       temperature: 0,
-      max_tokens: 256,
+      // 没有重复惩罚时，遇到静音/异常音频会退化成 "GGGG..." 直到上限
+      repeat_penalty: 1.15,
+      repeat_last_n: 64,
+      max_tokens: 200,
     }
     const response = await fetch(`http://127.0.0.1:${this.port}/v1/chat/completions`, {
       method: 'POST',

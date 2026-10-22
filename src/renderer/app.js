@@ -478,6 +478,14 @@ function transcribePartial(samples) {
 let backlogAudio = []
 
 function transcribe(samples) {
+  // 几乎静音的片段不值得送识别：既浪费算力，又会诱出退化输出
+  let peak = 0
+  for (let i = 0; i < samples.length; i += 16) {
+    const v = Math.abs(samples[i])
+    if (v > peak) peak = v
+  }
+  if (peak < Math.max(0.004, state.threshold * 0.8)) return
+
   if (state.pending >= 2) {
     backlogAudio.push(samples)
     return
