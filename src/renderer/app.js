@@ -226,10 +226,13 @@ function applyPace(name) {
 }
 
 function initPace() {
-  applyPace(localStorage.getItem('localvoice.pace') ?? 'balanced')
+  const saved = localStorage.getItem('localvoice.pace')
+  state.paceChosen = saved !== null
+  applyPace(saved ?? 'balanced')
   el.pace.addEventListener('click', () => {
     const order = ['fast', 'balanced', 'relaxed']
     const next = order[(order.indexOf(state.pace) + 1) % order.length]
+    state.paceChosen = true
     applyPace(next)
   })
 }
@@ -544,6 +547,13 @@ function transcribe(samples) {
       // 按最近几次推理的平均耗时调整临时稿频率。
       // 注意必须双向：之前写成了单向降频，一次预热就能把间隔永久锁在 5 秒。
       const costMs = Math.round((result.inferenceSeconds ?? 0) * 1000)
+      // 第一次用的人不该被迫理解"切句节奏"：按实测速度替他选一档
+      if (!state.paceChosen && costMs > 0 && state.inferenceSamples.length >= 3) {
+        const avg = state.inferenceSamples.reduce((a, b) => a + b, 0) / state.inferenceSamples.length
+        if (avg < 800) applyPace('fast')
+        else if (avg > 2000) applyPace('relaxed')
+        state.paceChosen = true
+      }
       state.lastInferenceMs = costMs
       if (costMs > 0) {
         state.inferenceSamples ??= []
