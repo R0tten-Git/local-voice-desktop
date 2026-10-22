@@ -53,6 +53,7 @@ const el = {
   gpuBar: document.getElementById('gpuBar'),
   gpuFill: document.getElementById('gpuFill'),
   gpuInstall: document.getElementById('gpuInstall'),
+  pace: document.getElementById('pace'),
   envSize: document.getElementById('envSize'),
   envPath: document.getElementById('envPath'),
   bar: document.getElementById('bar'),
@@ -195,6 +196,42 @@ const EMPTY_STATE = `
 
 function showEmptyState() {
   el.transcript.innerHTML = EMPTY_STATE
+}
+
+// ------------------------------------------------------------------ 切句节奏
+
+/**
+ * 三档切句策略。推理快的机器可以选"灵敏"（更实时），
+ * 想要整句完整就选"保守"（切得更少）。
+ */
+const PACES = {
+  fast: { label: '灵敏', silenceMs: 620, midCutAfterMs: 2000, midSilenceMs: 180, maxChunkMs: 6000 },
+  balanced: { label: '标准', silenceMs: 900, midCutAfterMs: 4000, midSilenceMs: 300, maxChunkMs: 12000 },
+  relaxed: { label: '保守', silenceMs: 1100, midCutAfterMs: 6000, midSilenceMs: 400, maxChunkMs: 18000 },
+}
+
+function applyPace(name) {
+  const pace = PACES[name] ?? PACES.balanced
+  state.pace = PACES[name] ? name : 'balanced'
+  LIVE.silenceMs = pace.silenceMs
+  LIVE.midCutAfterMs = pace.midCutAfterMs
+  LIVE.midSilenceMs = pace.midSilenceMs
+  LIVE.maxChunkMs = pace.maxChunkMs
+  if (el.pace) {
+    el.pace.textContent = pace.label
+    el.pace.dataset.pace = state.pace
+    el.pace.dataset.tip = `切句节奏：${pace.label}（点击切换）`
+  }
+  localStorage.setItem('localvoice.pace', state.pace)
+}
+
+function initPace() {
+  applyPace(localStorage.getItem('localvoice.pace') ?? 'balanced')
+  el.pace.addEventListener('click', () => {
+    const order = ['fast', 'balanced', 'relaxed']
+    const next = order[(order.indexOf(state.pace) + 1) % order.length]
+    applyPace(next)
+  })
 }
 
 // ------------------------------------------------------------------ 主题
@@ -947,6 +984,7 @@ async function startDownload() {
 }
 
 async function init() {
+  initPace()
   initTheme()
   initWave()
   if (el.toggle) {
