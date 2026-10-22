@@ -673,10 +673,11 @@ async function start() {
       (samples) => transcribePartial(samples),
       (error) => {
         if (error === null) {
-          // 音频恢复了：清掉提示，别让误报一直挂着
-          if (state.notice !== '') {
+          // 音频恢复了：无条件清掉提示（之前要求必须是 recording 态，
+          // 启动瞬间的误报会一直挂在底部）
+          if (state.notice.startsWith('麦克风不可用')) {
             state.notice = ''
-            if (state.phase === 'recording') render()
+            render()
           }
           return
         }

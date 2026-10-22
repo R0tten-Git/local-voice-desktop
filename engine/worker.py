@@ -58,6 +58,22 @@ FIXES = [
 ]
 
 
+HOTWORD_DUMP = "、".join(HOTWORDS)
+
+
+def strip_hotword_dump(text: str) -> str:
+    """模型偶尔会复述热词表，这里整段剔掉。"""
+    if not text:
+        return text
+    if HOTWORD_DUMP in text:
+        text = text.replace(HOTWORD_DUMP, "")
+    hits = sum(1 for word in HOTWORDS if word in text)
+    if hits >= 6:
+        for word in HOTWORDS:
+            text = text.replace(f"{word}、", "").replace(word, "")
+    return text.strip()
+
+
 def apply_fixes(text: str):
     """返回 (纠正后文本, 命中的原始片段列表)。"""
     hits = []
@@ -189,17 +205,16 @@ def main() -> int:
             import numpy as _np
             level = float(_np.sqrt(_np.mean(audio.astype(_np.float64) ** 2)))
             peak = float(_np.abs(audio).max())
+            # 热词表不再传给模型：它会被当成待转写内容，整段复述出来
             hotwords = req.get("hotwords")
-            if not isinstance(hotwords, list) or not hotwords:
-                hotwords = HOTWORDS
+            if not isinstance(hotwords, list):
+                hotwords = []
             t1 = time.time()
-            res = model.generate(
-                audio,
-                language=language,
-                verbose=False,
-                hotwords=list(hotwords),
-            )
-            raw_text = (getattr(res, "text", "") or "").strip()
+            gen_kwargs = {"language": language, "verbose": False}
+            if hotwords:
+                gen_kwargs["hotwords"] = hotwords
+            res = model.generate(audio, **gen_kwargs)
+            raw_text = strip_hotword_dump((getattr(res, "text", "") or "").strip())
             text, hits = apply_fixes(raw_text)
             # 纯语气词当噪声丢掉：实测呼吸/空调会被识别成「嗯。」「啊。」
             core = "".join(ch for ch in text if ch not in "，。、；：！？… ")
