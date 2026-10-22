@@ -494,7 +494,14 @@ function transcribe(samples) {
       if (text) appendLine(text, result.audioSeconds)
     })
     .catch((error) => {
-      appendMessage(`识别失败：${error.message ?? error}`)
+      const text = String(error?.message ?? error)
+      // 引擎重启/切换模型时在途请求会被拒，这属于正常流程，不该刷红字
+      if (text.includes('引擎已停止') || text.includes('引擎已退出') || text.includes('引擎不可用')) {
+        state.notice = '引擎已重启，继续说话即可'
+        render()
+        return
+      }
+      appendMessage(`识别失败：${text}`)
     })
     .finally(() => {
       state.pending -= 1
@@ -898,6 +905,12 @@ el.openModels.addEventListener('click', () => void api.openModelsFolder())
 el.download.addEventListener('click', () => void startDownload())
 el.installEnv.addEventListener('click', () => void installEnvironment())
 el.model.addEventListener('change', async () => {
+  // 切换模型会重建引擎；如果正在录音，先把会话停干净再切，免得在途请求被拒
+  if (state.phase === 'recording') {
+    pause()
+    state.notice = '已切换模型，点 ▶ 继续'
+    render()
+  }
   el.setup.classList.add('hidden')
   const missing = !state.probe.installed.includes(el.model.value)
   el.setup.classList.toggle('hidden', !missing)
