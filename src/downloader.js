@@ -9,6 +9,7 @@ const fsp = require('node:fs/promises')
 const path = require('node:path')
 const { Readable } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
+const { createHash } = require('node:crypto')
 
 const API = 'https://modelscope.cn/api/v1/models/{repo}/repo/files?Revision=master&Recursive=true'
 const FILE = 'https://modelscope.cn/models/{repo}/resolve/master/{path}'
@@ -26,7 +27,18 @@ async function listFiles(repo) {
   const entries = payload?.Data?.Files ?? []
   return entries
     .filter((item) => item.Path && item.Type !== 'tree')
-    .map((item) => ({ path: item.Path, size: Number(item.Size ?? 0) }))
+    .map((item) => ({
+      path: item.Path,
+      size: Number(item.Size ?? 0),
+      sha256: String(item.Sha256 ?? '').toLowerCase(),
+    }))
+}
+
+/** 计算文件 sha256（流式，避免把大文件读进内存）。 */
+async function fileSha256(filePath) {
+  const hash = createHash('sha256')
+  await pipeline(fs.createReadStream(filePath), hash)
+  return hash.digest('hex')
 }
 
 /** 单个文件：支持续传，返回实际写入的字节数。 */
@@ -35,7 +47,17 @@ async function downloadFile(repo, file, destRoot, onBytes) {
   await fsp.mkdir(path.dirname(target), { recursive: true })
 
   if (fs.existsSync(target) && fs.statSync(target).size === file.size) {
-    return 0 // 已完整
+    // 大小对不代表内容对：之前的版本只比大小，结果把损坏的模型当成了已下载
+    if (file.sha256) {
+      const actual = await fileSha256(target)
+      if (actual !== file.sha256) {
+        await fsp.rm(target, { force: true }) // 内容不对，删掉重下
+      } else {
+        return 0
+      }
+    } else {
+      return 0
+    }
   }
 
   const part = `${target}.part`
@@ -68,6 +90,17 @@ async function downloadFile(repo, file, destRoot, onBytes) {
     throw new Error(`${file.path} 大小不符：期望 ${file.size}，实际 ${total}`)
   }
   await fsp.rename(part, target)
+
+  if (file.sha256) {
+    const actual = await fileSha256(target)
+    if (actual !== file.sha256) {
+      onBytes?.(-1)
+      await fsp.rm(target, { force: true })
+      throw new Error(
+        `${file.path} 内容校验失败（期望 ${file.sha256.slice(0, 12)}…，实际 ${actual.slice(0, 12)}…）`,
+      )
+    }
+  }
   return written
 }
 
@@ -90,6 +123,25 @@ async function downloadModel(repo, destRoot, onProgress = () => {}, include) {
   let doneBytes = 0
   let lastEmit = 0
 
+  /** 带进度回调的下载。 */
+  const fetchFile = async (file, index, started) =>
+    downloadFile(repo, file, destRoot, (bytes) => {
+      doneBytes += bytes
+      const now = Date.now()
+      if (now - lastEmit < PROGRESS_INTERVAL_MS) return
+      lastEmit = now
+      const seconds = (now - started) / 1000
+      onProgress({
+        phase: 'bytes',
+        file: file.path,
+        index: index + 1,
+        files: files.length,
+        doneBytes,
+        totalBytes,
+        bytesPerSecond: seconds > 0 ? Math.round(doneBytes / seconds) : undefined,
+      })
+    })
+
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index]
     onProgress({
@@ -101,65 +153,26 @@ async function downloadModel(repo, destRoot, onProgress = () => {}, include) {
       totalBytes,
     })
     const started = Date.now()
-    await downloadFile(repo, file, destRoot, (bytes) => {
-      doneBytes += bytes
-      const now = Date.now()
-      if (now - lastEmit >= PROGRESS_INTERVAL_MS) {
-        lastEmit = now
-        const seconds = (now - started) / 1000
-        onProgress({
-          phase: 'bytes',
-          file: file.path,
-          index: index + 1,
-          files: files.length,
-          doneBytes,
-          totalBytes,
-          bytesPerSecond: seconds > 0 ? Math.round(doneBytes / seconds) : undefined,
-        })
-      }
-    })
+    try {
+      await fetchFile(file, index, started)
+    } catch (error) {
+      if (!String(error.message).includes('内容校验失败')) throw error
+      // 续传拼出来的文件内容不对：丢掉残片，从头再下一遍
+      onProgress({
+        phase: 'file',
+        file: `${file.path}（校验失败，重新下载）`,
+        index: index + 1,
+        files: files.length,
+        doneBytes,
+        totalBytes,
+      })
+      await fsp.rm(`${path.join(destRoot, file.path)}.part`, { force: true })
+      await fetchFile(file, index, Date.now())
+    }
   }
 
   onProgress({ phase: 'done', doneBytes, totalBytes, files: files.length })
   return { path: destRoot, bytes: doneBytes }
-}
-
-/**
- * 下载单个 URL 到本地文件，支持断点续传。
- * @param {string} url
- * @param {string} dest 目标文件路径
- * @param {(info: {doneBytes:number,totalBytes:number,speed:number}) => void} onProgress
- */
-async function downloadUrl(url, dest, onProgress = () => {}) {
-  await fsp.mkdir(path.dirname(dest), { recursive: true })
-  const part = `${dest}.part`
-  let offset = fs.existsSync(part) ? fs.statSync(part).size : 0
-
-  const headers = { 'user-agent': 'local-voice-desktop' }
-  if (offset > 0) headers.Range = `bytes=${offset}-`
-  const response = await fetch(url, { headers, redirect: 'follow', signal: AbortSignal.timeout(30 * 60_000) })
-  if (!response.ok && response.status !== 206) throw new Error(`下载失败 HTTP ${response.status}`)
-
-  // 续传时服务器可能返回整份文件，需要从头写
-  if (offset > 0 && response.status === 200) offset = 0
-
-  const total = Number(response.headers.get('content-length') ?? 0) + offset
-  const handle = fs.createWriteStream(part, { flags: offset > 0 ? 'a' : 'w' })
-  let done = offset
-  const started = Date.now()
-  const source = Readable.fromWeb(response.body)
-  source.on('data', (chunk) => {
-    done += chunk.length
-    const seconds = (Date.now() - started) / 1000
-    onProgress({
-      doneBytes: done,
-      totalBytes: total,
-      speed: seconds > 0 ? Math.round((done - offset) / seconds) : 0,
-    })
-  })
-  await pipeline(source, handle)
-  await fsp.rename(part, dest)
-  return { path: dest, bytes: done }
 }
 
 module.exports = { downloadModel, listFiles, downloadFile, downloadUrl }
