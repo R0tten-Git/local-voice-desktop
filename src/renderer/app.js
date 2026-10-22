@@ -466,7 +466,19 @@ function transcribePartial(samples) {
     })
 }
 
+/** 推理跟不上时先把音频攒起来，等队列消化后再一起送，避免无限排队 */
+let backlogAudio = []
+
 function transcribe(samples) {
+  if (state.pending >= 2) {
+    backlogAudio.push(samples)
+    return
+  }
+  if (backlogAudio.length > 0) {
+    samples = concatFrames([...backlogAudio, samples])
+    backlogAudio = []
+  }
+
   state.pending += 1
   render()
   state.queue = state.queue
@@ -513,6 +525,12 @@ function transcribe(samples) {
     })
     .finally(() => {
       state.pending -= 1
+      // 队列腾出位置后，把攒下的音频合并成一段再送
+      if (backlogAudio.length > 0 && state.pending < 2) {
+        const merged = concatFrames(backlogAudio)
+        backlogAudio = []
+        transcribe(merged)
+      }
       render()
     })
 }
@@ -658,6 +676,7 @@ async function start() {
 
 function pause() {
   clearPartial()
+  if (state.notice.startsWith('麦克风不可用')) state.notice = ''
   state.session?.stop()
   state.session = undefined
   state.accumulated += Date.now() - state.startedAt

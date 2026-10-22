@@ -179,6 +179,29 @@ def main() -> int:
     model.to(device)
     model.eval()
 
+    if device == "cpu":
+        # CPU 上 float32 太慢（实测每段 9 秒）。动态量化只作用于 Linear 层，
+        # 精度损失很小但速度通常提升 2–3 倍。
+        try:
+            log("CPU 动态量化（int8）…")
+            model = torch.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+            # 走一遍完整前向，确认量化没破坏多模态结构
+            import numpy as _np
+
+            probe = processor.apply_transcription_request(
+                audio=_np.zeros(8000, dtype=_np.float32), language=None, return_tensors="pt"
+            )
+            with torch.no_grad():
+                model.generate(**probe, max_new_tokens=2)
+            log("量化完成（自检通过）")
+        except Exception as error:
+            log(f"量化不可用（{type(error).__name__}），回退 float32")
+            import gc
+
+            del model
+            gc.collect()
+            model = load(dtype)
+
     # 这里刻意不传 prompt（热词表）：0.6B 这类小模型会把 system prompt
     # 当成待转写内容原样吐出来，用户会看到"调优、转写、实时转写…"整行。
     # MLX 后端用的是解码期偏置，没有这个问题。
