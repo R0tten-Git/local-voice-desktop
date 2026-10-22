@@ -197,7 +197,13 @@ class Engine {
   async transcribe(wav, language = 'auto', timeoutMs = REQUEST_TIMEOUT_MS) {
     if (!this.model) throw new Error('引擎尚未启动：请先选择模型')
     const now = Date.now()
-    if (this.child && this.lastUsedAt && now - this.lastUsedAt > WAKE_GAP_MS) {
+    // 只有完全空闲时才做"唤醒重启"，否则会把在途的临时稿请求一起判死
+    if (
+      this.child &&
+      this.pending.size === 0 &&
+      this.lastUsedAt &&
+      now - this.lastUsedAt > WAKE_GAP_MS
+    ) {
       this.log('长时间空闲，视为刚唤醒，重启引擎')
       this.kill()
     }
@@ -223,9 +229,10 @@ class Engine {
     const result = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        this.log(`识别超时（${timeoutMs}ms），重启引擎`)
-        this.kill()
-        reject(new Error('识别超时，引擎已重启'))
+        this.log(`识别超时（${timeoutMs}ms）`)
+        reject(new Error('识别超时'))
+        // 只有连一条都不剩了才重启引擎，避免一次超时把别的请求一起判死
+        if (this.pending.size === 0) this.kill()
       }, timeoutMs)
       this.pending.set(id, { resolve, reject, timer })
     })
