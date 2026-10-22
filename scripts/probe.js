@@ -71,8 +71,10 @@ const MODELS = [
     accuracy: 100.0,
     latencyMs: 700,
     backends: ['llama.cpp'],
+    // 1.7B GGUF 只在 Apple Silicon 上给用户选；Windows 那台跑不动
+    platforms: ['darwin'],
     tier: 'balanced',
-    note: 'Windows / Intel Mac：走 llama.cpp + CUDA 或 CPU',
+    note: 'Apple Silicon 的 llama.cpp 备选（显存/内存 ≥ 5 GB）',
   },
   {
     id: 'qwen3-asr-1.7b-hf',
@@ -82,6 +84,7 @@ const MODELS = [
     rssGb: 7.0,
     accuracy: 100.0,
     latencyMs: 2100,
+    platforms: ['linux'],
     backends: ['torch'],
     tier: 'balanced',
     note: 'Windows / Intel Mac：有 NVIDIA 显卡才流畅（CPU 约 2 秒/句）',
@@ -95,8 +98,9 @@ const MODELS = [
     accuracy: 98.4,
     latencyMs: 700,
     backends: ['torch'],
+    platforms: ['linux'],
     tier: 'fallback',
-    note: '没有独立显卡时用这个，内存占用小一半',
+    note: 'Linux / 调试用；Windows 请用 GGUF',
   },
   {
     id: 'qwen3-asr-0.6b-gguf-q8',
@@ -206,7 +210,11 @@ async function probe() {
     platform === 'darwin' && arch === 'arm64' ? ['mlx', 'llama.cpp'] : ['llama.cpp', 'torch']
   const backend = backends[0]
 
-  const candidates = MODELS.filter((m) => m.backends.some((b) => backends.includes(b)))
+  const candidates = MODELS.filter(
+    (m) =>
+      m.backends.some((b) => backends.includes(b)) &&
+      (m.platforms === undefined || m.platforms.includes(platform)),
+  )
   /** 内存要留一半给系统和应用本身，这是经验值。 */
   const usable = totalRamGb * 0.5
   const fits = candidates.filter((m) => m.rssGb <= usable && (diskGb === undefined || m.sizeGb + 2 < diskGb))
