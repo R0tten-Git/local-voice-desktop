@@ -8,16 +8,16 @@ const api = window.localVoice
 
 const LIVE = {
   sampleRate: 16000,
-  silenceMs: 700,
+  silenceMs: 900,
   minSpeechMs: 400,
   /**
    * 硬上限。连续说话时靠它兜底，切得越碎越容易切在句子中间。
    * 实时感由"临时结果"负责，所以这里可以放宽。
    */
-  maxChunkMs: 8000,
+  maxChunkMs: 12000,
   /** 一段超过这么久之后，遇到 350ms 的短停顿就切（逗号级停顿，不会劈开词组） */
-  midCutAfterMs: 2500,
-  midSilenceMs: 200,
+  midCutAfterMs: 4000,
+  midSilenceMs: 300,
   /** 边说边出的临时结果：每隔这么久把当前缓冲送一次识别 */
   partialEveryMs: 1200,
   /** 推理慢的机器（CPU）自动放宽到这个间隔，否则临时结果会占满算力 */
@@ -277,6 +277,8 @@ async function openMicrophone(onChunk, onPartial, onError) {
   // 看门狗：6 秒内一帧都没收到才算异常。3 秒太激进——蓝牙耳机、刚插上的
   // USB 麦克风、系统切设备时都可能在 3 秒后才开始出数据，会误报。
   let framesSeen = 0
+  /** 看门狗报过警；等音频恢复时用它来决定是否清提示 */
+  let stallReported = false
   const watchdog = setInterval(() => {
     if (framesSeen > 0) {
       clearInterval(watchdog)
@@ -284,6 +286,7 @@ async function openMicrophone(onChunk, onPartial, onError) {
     }
     if (audio.state === 'running') return // 上下文在跑，再给一点时间
     clearInterval(watchdog)
+    stallReported = true
     onError?.(new Error('音频上下文没有启动，没收到麦克风数据'))
   }, 6000)
 
