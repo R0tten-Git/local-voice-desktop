@@ -61,8 +61,10 @@ if (isWin) {
 }
 
 // 把可执行文件和库平铺到 outDir，其余工具删掉
+// Windows：保留 llama-server.exe 和**全部** DLL。
+// 之前只留了几个，漏掉 llama-server-impl.dll 导致进程秒退。
 const keep = isWin
-  ? /^(llama-server\.exe|llama\.dll|ggml.*\.dll|mtmd\.dll)$/i
+  ? /^(llama-server\.exe|.*\.dll)$/i
   : /^(llama-server|libggml.*\.dylib|libllama.*\.dylib|libmtmd.*\.dylib)$/
 
 const walk = (dir) => {

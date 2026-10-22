@@ -162,11 +162,17 @@ class Engine {
       stream.on('data', (chunk) => {
         for (const line of String(chunk).split('\n')) {
           const text = line.trim()
-          if (text && /error|loaded|listening|audio/i.test(text)) this.log(text.slice(0, 200))
+          // 全量记录：启动失败往往只有几行 stderr，过滤掉就没线索了
+          if (text) this.log(text.slice(0, 300))
         }
       })
     }
-    child.on('exit', (code) => {
+    child.on('error', (error) => {
+      this.log(`llama-server 无法启动：${error.message}`)
+      this.child = undefined
+    })
+    child.on('exit', (code, signal) => {
+      this.log(`llama-server 退出（code=${code}, signal=${signal ?? '无'}）`)
       this.failAll(new Error(`llama-server 退出（code=${code}）`))
       this.child = undefined
     })
@@ -189,6 +195,7 @@ class Engine {
       }
       await new Promise((r) => setTimeout(r, 500))
     }
+    this.log(`llama-server 在 ${Date.now() - started}ms 内没有响应 /health`)
     this.kill('llama-server 启动超时')
     throw new Error('llama-server 启动超时')
   }
