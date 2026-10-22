@@ -390,8 +390,14 @@ ipcMain.handle('env:install', async () => {
 })
 
 ipcMain.handle('engine:start', async (_event, modelId) => {
-  const model = MODELS.find((m) => m.id === modelId)
-  if (!model) throw new Error(`未知模型：${modelId}`)
+  let model = MODELS.find((m) => m.id === modelId)
+  if (!model) {
+    // 兜底：界面状态异常导致传了空 id 时，选一个已下载的可用模型
+    const ready = MODELS.filter((m) => fs.existsSync(modelDir(m.repo)))
+    model = ready[0]
+    if (!model) throw new Error(`未知模型：${modelId ?? '(空)'}，且没有已下载的模型`)
+    logLine(`模型 id 为空，回退到 ${model.id}`)
+  }
   const dir = modelDir(model.repo)
   if (!fs.existsSync(dir)) throw new Error(`模型未下载：${dir}`)
   const started = Date.now()

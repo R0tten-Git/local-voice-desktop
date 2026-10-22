@@ -91,6 +91,8 @@ const state = {
   audioInfo: '',
   /** 临时结果的间隔，按最近的推理耗时动态调整 */
   partialEveryMs: 1200,
+  /** 当前选中的模型 id —— 不依赖 DOM，避免 select 状态异常时取到空值 */
+  modelId: '',
   /** 最近几次推理耗时，用来算平均值 */
   inferenceSamples: [],
   lastInferenceMs: 0,
@@ -646,7 +648,7 @@ function appendMessage(text) {
 
 async function start() {
   state.notice = ''
-  const modelId = el.model.value
+  const modelId = state.modelId
   if (!modelId) {
     // 探测还没跑完时模型列表是空的，点了也不能开工
     state.notice = '正在读取模型列表，请稍候再点'
@@ -944,6 +946,10 @@ async function init() {
   state.probe = await api.probe()
   document.body.classList.add(`platform-${state.probe.platform}`)
   const { options, recommended, installed, backend, totalRamGb, gpuName } = state.probe
+  // 选定模型：优先推荐项，否则第一个
+  const chosen = options.find((m) => m.id === recommended) ?? options[0]
+  state.modelId = chosen?.id ?? ''
+  if (state.modelId !== '') el.model.value = state.modelId
 
   el.model.innerHTML = ''
   for (const model of options) {
@@ -970,7 +976,7 @@ async function init() {
     el.toggle.title = options.length > 0 ? '开始 / 暂停' : '没有可用模型'
   }
 
-  const missing = options.length > 0 && !installed.includes(el.model.value)
+  const missing = options.length > 0 && !installed.includes(state.modelId)
   // 环境没准备好时也要把面板露出来，否则用户看不到"安装环境"
   el.setup.classList.toggle('hidden', !(missing || envMissing))
   if (envMissing) {
@@ -1031,6 +1037,7 @@ el.gpuInstall.addEventListener('click', () => {
   void installCuda()
 })
 el.model.addEventListener('change', async () => {
+  state.modelId = el.model.value
   // 切换模型会重建引擎；如果正在录音，先把会话停干净再切，免得在途请求被拒
   if (state.phase === 'recording') {
     pause()
