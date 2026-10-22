@@ -102,7 +102,13 @@ class Engine {
           stdio: ['pipe', 'pipe', 'pipe'],
           // Windows 上 Python 的 stdout 默认走系统代码页（中文系统是 GBK），
           // 父进程按 UTF-8 解码就会变成乱码方块。
-          env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+          env: {
+            ...process.env,
+            PYTHONIOENCODING: 'utf-8',
+            PYTHONUTF8: '1',
+            // 缓解 CUDA 显存碎片（PyTorch 官方建议）
+            PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True',
+          },
         })
       } catch (error) {
         reject(error)

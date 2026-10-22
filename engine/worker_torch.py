@@ -196,7 +196,30 @@ def main() -> int:
             log("半精度也失败。请在 Windows「系统属性 → 高级 → 性能设置 → 高级 → 虚拟内存」")
             log("把分页文件调到 8GB 以上，或关闭其他占用内存的程序后重试。")
             raise
-    model.to(device)
+    # 上卡前先看显存够不够，不够就直接说清楚
+    if device == "cuda":
+        free, total = (v / 1e9 for v in torch.cuda.mem_get_info())
+        need = 2.6 if "0.6B" in model_path else 4.8
+        log(f"显存：空闲 {free:.1f} GB / 共 {total:.1f} GB，本模型约需 {need:.1f} GB")
+        if free < need:
+            log("显存不足，改用 CPU 推理（关闭占用显卡的程序后可重启再试）")
+            device = "cpu"
+            dtype = torch.float32
+
+    try:
+        model.to(device)
+    except (torch.OutOfMemoryError, RuntimeError) as error:
+        if "out of memory" not in str(error).lower():
+            raise
+        log(f"上卡失败（{error}），退回 CPU")
+        torch.cuda.empty_cache()
+        device = "cpu"
+        dtype = torch.float32
+        del model
+        import gc
+
+        gc.collect()
+        model = load(dtype).to("cpu")
     model.eval()
 
     if device == "cpu":
