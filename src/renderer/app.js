@@ -93,6 +93,8 @@ const state = {
   audioInfo: '',
   /** 临时结果的间隔，按最近的推理耗时动态调整 */
   partialEveryMs: 1200,
+  /** 当前是否在一个录音会话里（暂停也算，重新开始才算新会话） */
+  sessionActive: false,
   /** 是否区分说话人 */
   speakers: true,
   /** 说话人编号 → 自定义名字 */
@@ -225,10 +227,14 @@ function initSpeakers() {
     el.speakers.dataset.pace = state.speakers ? 'fast' : ''
     el.speakers.textContent = state.speakers ? '说话人' : '单人'
     el.speakers.dataset.tip = state.speakers
-      ? '已开启区分说话人（点击关闭）'
+      ? '区分说话人已开启（点击关闭，右键清除记录）'
       : '已关闭（点击开启）'
   }
   paint()
+  el.speakers.addEventListener('contextmenu', (event) => {
+    event.preventDefault()
+    clearSpeakerRecords()
+  })
   el.speakers.addEventListener('click', () => {
     state.speakers = !state.speakers
     localStorage.setItem('localvoice.speakers', state.speakers ? 'on' : 'off')
@@ -240,6 +246,22 @@ function initSpeakers() {
       render()
     }
   })
+}
+
+/**
+ * 清除全部说话人记录：聚类编号、自定义名字、以及行上的标注。
+ * 换场景（新的一场会议/新的人）时用，避免新的人被塞进旧编号。
+ */
+function clearSpeakerRecords(keepLabels = false) {
+  void api.resetSpeakers()
+  state.speakerNames = {}
+  localStorage.removeItem('localvoice.speakerNames')
+  if (!keepLabels) {
+    for (const line of state.lines) delete line.speaker
+    if (state.lines.length > 0) rebuildTranscript()
+  }
+  state.notice = '说话人记录已清除，下一个人会从「说话人 1」重新开始编'
+  render()
 }
 
 /** 重新渲染整个转写区（改名后需要重画）。 */
@@ -872,6 +894,14 @@ async function start() {
     render()
     return
   }
+  // 上一段录音已经结束（不是暂停续录）→ 说话人编号从 1 重新开始，
+  // 否则新的人会被硬塞进上一场留下的编号里
+  if (!state.sessionActive) {
+    void api.resetSpeakers()
+    state.speakerNames = {}
+    localStorage.removeItem('localvoice.speakerNames')
+    state.sessionActive = true
+  }
   el.state.textContent = '引擎加载中…'
   render()
   try {
@@ -907,6 +937,7 @@ async function start() {
 }
 
 function pause() {
+  // 暂停后继续仍算同一段会话，说话人编号保持不变
   clearPartial()
   if (state.notice.startsWith('麦克风不可用')) state.notice = ''
   state.session?.stop()
@@ -930,6 +961,9 @@ function clearAll() {
   state.timer = undefined
   clearPartial()
   void api.resetSpeakers()
+  state.speakerNames = {}
+  localStorage.removeItem('localvoice.speakerNames')
+  state.sessionActive = false
   state.lines = []
   state.accumulated = 0
   state.peak = 0

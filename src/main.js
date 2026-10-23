@@ -59,6 +59,9 @@ async function identifySpeaker(wav) {
   const HOP_S = 0.75
   const labels = []
   const scores = []
+  /** 一个 chunk 内可能发生多次待定转正/合并，必须全部收集起来，
+      否则界面只知道最后一次，前面的"说话人 ?"永远改不回来 */
+  const allMerges = []
   for (let start = 0; start + WINDOW_S * 0.6 <= audio.length / 16000; start += HOP_S) {
     const from = Math.round(start * 16000)
     const to = Math.min(audio.length, Math.round((start + WINDOW_S) * 16000))
@@ -69,6 +72,7 @@ async function identifySpeaker(wav) {
     })
     const embedding = SpeakerTracker.normalize(Float32Array.from(output.embedding.data))
     const result = speakerTracker.assign(embedding)
+    if (Array.isArray(speakerTracker.merges)) allMerges.push(...speakerTracker.merges)
     labels.push(result.id)
     scores.push(result.similarity)
   }
@@ -84,7 +88,7 @@ async function identifySpeaker(wav) {
 
   logLine(
     `声纹 ${voicedSeconds.toFixed(1)}s → 窗口 [${labels.join(',')}] → 说话人 ${dominant}` +
-      `${mixed ? '（混说）' : ''}`,
+      `${mixed ? '（混说）' : ''}${allMerges.length > 0 ? ` 合并${JSON.stringify(allMerges)}` : ''}`,
   )
 
   return {
@@ -93,7 +97,7 @@ async function identifySpeaker(wav) {
     voicedSeconds: Number(voicedSeconds.toFixed(2)),
     windows: labels.length,
     mixed,
-    merges: speakerTracker.merges ?? [],
+    merges: allMerges,
   }
 }
 
