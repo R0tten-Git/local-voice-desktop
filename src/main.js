@@ -41,29 +41,58 @@ async function getSpeakerSession() {
 }
 
 /** 为一段 WAV 计算说话人编号；太短的片段不可靠，直接跳过。 */
+/**
+ * 说话人识别：按窗口算，而不是按整段算。
+ *
+ * 两人对话时一个 8 秒的段里常有两个人，整段算出来的是混合声纹，判给谁都是错。
+ * 所以切成 1.5 秒窗口分别判定，再取多数；两个说话人都占不少比例时标记"混说"。
+ */
 async function identifySpeaker(wav) {
   const raw = decodeWav(wav)
   const { audio, voicedSeconds } = trimSilence(raw)
-  // 有效语音太短的向量不可信，宁可不标
   if (voicedSeconds < 0.9) return { skipped: true, voicedSeconds: Number(voicedSeconds.toFixed(2)) }
 
   const session = await getSpeakerSession()
   const ort = require('onnxruntime-node')
-  const { data, frames } = fbank(audio)
-  const output = await session.run({
-    x: new ort.Tensor('float32', data, [1, frames, NUM_BINS]),
-  })
-  const embedding = SpeakerTracker.normalize(Float32Array.from(output.embedding.data))
-  const result = speakerTracker.assign(embedding)
+
+  const WINDOW_S = 1.5
+  const HOP_S = 0.75
+  const labels = []
+  const scores = []
+  for (let start = 0; start + WINDOW_S * 0.6 <= audio.length / 16000; start += HOP_S) {
+    const from = Math.round(start * 16000)
+    const to = Math.min(audio.length, Math.round((start + WINDOW_S) * 16000))
+    if (to - from < 16000 * 0.9) break
+    const { data, frames } = fbank(audio.subarray(from, to))
+    const output = await session.run({
+      x: new ort.Tensor('float32', data, [1, frames, NUM_BINS]),
+    })
+    const embedding = SpeakerTracker.normalize(Float32Array.from(output.embedding.data))
+    const result = speakerTracker.assign(embedding)
+    labels.push(result.id)
+    scores.push(result.similarity)
+  }
+
+  if (labels.length === 0) return { skipped: true, voicedSeconds: Number(voicedSeconds.toFixed(2)) }
+
+  // 取出现最多的编号
+  const tally = new Map()
+  for (const id of labels) tally.set(id, (tally.get(id) ?? 0) + 1)
+  const [dominant, hits] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]
+  const share = hits / labels.length
+  const mixed = share < 0.7 && tally.size > 1
+
   logLine(
-    `声纹 ${voicedSeconds.toFixed(1)}s 语音 → 说话人 ${result.id}` +
-      `（相似度 ${result.similarity.toFixed(3)}${result.created ? '，新建' : ''}）`,
+    `声纹 ${voicedSeconds.toFixed(1)}s → 窗口 [${labels.join(',')}] → 说话人 ${dominant}` +
+      `${mixed ? '（混说）' : ''}`,
   )
+
   return {
-    id: result.id,
-    similarity: Number(result.similarity.toFixed(3)),
+    id: dominant,
+    similarity: Number((scores[labels.indexOf(dominant)] ?? 0).toFixed(3)),
     voicedSeconds: Number(voicedSeconds.toFixed(2)),
-    // 聚类过程中发生的合并，界面要据此回改已经标注过的行
+    windows: labels.length,
+    mixed,
     merges: speakerTracker.merges ?? [],
   }
 }

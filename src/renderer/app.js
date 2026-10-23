@@ -813,10 +813,17 @@ function pushLine(text, ts, speaker, existingId) {
     chip.className = 'speaker'
     const dot = document.createElement('i')
     dot.style.background = SPEAKER_COLORS[(speakerId - 1) % SPEAKER_COLORS.length]
-    chip.append(dot, document.createTextNode(speakerLabel(speakerId)))
+    const mixed = line.speaker.mixed === true
+    chip.append(
+      dot,
+      document.createTextNode(`${speakerLabel(speakerId)}${mixed ? ' · 混说' : ''}`),
+    )
+    if (mixed) chip.style.color = 'var(--fg-3)'
     const similarity =
       line.speaker.similarity === undefined ? '' : ` · 相似度 ${line.speaker.similarity}`
-    chip.title = `${speakerLabel(speakerId)}${similarity}（点击改名）`
+    chip.title = mixed
+      ? `${speakerLabel(speakerId)}：这段里有两个以上的人在说（${line.speaker.windows ?? '?'} 个窗口）`
+      : `${speakerLabel(speakerId)}${similarity}`
     chip.addEventListener('click', (event) => {
       event.stopPropagation()
       editSpeakerName(chip, speakerId)
