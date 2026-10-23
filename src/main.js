@@ -10,14 +10,17 @@ const { Engine } = require('./engine')
 const { probe, MODELS } = require('../scripts/probe')
 const { downloadModel } = require('./downloader')
 const bootstrap = require('./bootstrap')
-const { fbank, decodeWav, SpeakerTracker, NUM_BINS } = require('./speaker')
+const { fbank, trimSilence, decodeWav, SpeakerTracker, NUM_BINS } = require('./speaker')
 
 /**
  * 声纹引擎：模型和运行时都随安装包分发，第一次用到时才初始化。
  * 28MB 的模型跑一次约 20–40ms，CPU 足够。
  */
 let speakerReady
-const speakerTracker = new SpeakerTracker()
+const speakerTracker = new SpeakerTracker({
+  // 音色特别接近的两个人可以调高；默认 0.68 在实测中正好分开相近女声
+  threshold: Number(process.env.LOCALVOICE_SPEAKER_THRESHOLD ?? 0.68),
+})
 
 async function getSpeakerSession() {
   if (speakerReady === undefined) {
@@ -39,8 +42,11 @@ async function getSpeakerSession() {
 
 /** 为一段 WAV 计算说话人编号；太短的片段不可靠，直接跳过。 */
 async function identifySpeaker(wav) {
-  const audio = decodeWav(wav)
-  if (audio.length / 16000 < 0.6) return undefined
+  const raw = decodeWav(wav)
+  const { audio, voicedSeconds } = trimSilence(raw)
+  // 有效语音太短的向量不可信，宁可不标
+  if (voicedSeconds < 0.9) return { skipped: true, voicedSeconds: Number(voicedSeconds.toFixed(2)) }
+
   const session = await getSpeakerSession()
   const ort = require('onnxruntime-node')
   const { data, frames } = fbank(audio)
@@ -49,8 +55,41 @@ async function identifySpeaker(wav) {
   })
   const embedding = SpeakerTracker.normalize(Float32Array.from(output.embedding.data))
   const result = speakerTracker.assign(embedding)
-  return { id: result.id, similarity: Number(result.similarity.toFixed(3)) }
+  logLine(
+    `声纹 ${voicedSeconds.toFixed(1)}s 语音 → 说话人 ${result.id}` +
+      `（相似度 ${result.similarity.toFixed(3)}${result.created ? '，新建' : ''}）`,
+  )
+  return {
+    id: result.id,
+    similarity: Number(result.similarity.toFixed(3)),
+    voicedSeconds: Number(voicedSeconds.toFixed(2)),
+    // 聚类过程中发生的合并，界面要据此回改已经标注过的行
+    merges: speakerTracker.merges ?? [],
+  }
 }
+
+/** 右键说话人标签时弹出的菜单：改判 / 改名 / 拆分。 */
+ipcMain.handle('speaker:menu', async (event, { current, ids }) => {
+  return await new Promise((resolve) => {
+    let settled = false
+    const done = (value) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    const items = [
+      { label: '重命名…', click: () => done('rename') },
+      { type: 'separator' },
+      ...ids
+        .filter((id) => id !== current)
+        .map((id) => ({
+          label: `改判为 说话人 ${id}`,
+          click: () => done(String(id)),
+        })),
+    ]
+    Menu.buildFromTemplate(items).popup({ window: BrowserWindow.fromWebContents(event.sender), callback: () => done(undefined) })
+  })
+})
 
 ipcMain.handle('speaker:reset', async () => {
   speakerTracker.reset()

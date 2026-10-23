@@ -250,6 +250,34 @@ function rebuildTranscript() {
   for (const line of state.lines) pushLine(line.text, line.ts, line.speaker, line.id)
 }
 
+/** 把某个编号的行全部改判成另一个编号。 */
+function reassignSpeaker(from, to) {
+  let touched = 0
+  for (const line of state.lines) {
+    if (line.speaker?.id !== from) continue
+    line.speaker = { ...line.speaker, id: to }
+    touched += 1
+  }
+  rebuildTranscript()
+  render()
+  if (touched > 0) state.notice = `已把 ${speakerLabel(from)} 的 ${touched} 句改判为 ${speakerLabel(to)}`
+  render()
+}
+
+/** 应用引擎报告的合并（说话人 2 并入 1）。 */
+function applyMerges(merges) {
+  if (!Array.isArray(merges) || merges.length === 0) return
+  for (const { from, into } of merges) reassignSpeaker(from, into)
+}
+
+/** 右键说话人标签 → 改判 / 改名。 */
+async function speakerMenu(chip, id) {
+  const ids = [...new Set(state.lines.map((line) => line.speaker?.id).filter(Boolean))]
+  const choice = await api.speakerMenu({ current: id, ids: ids.length > 0 ? ids : [id] })
+  if (choice === 'rename') editSpeakerName(chip, id)
+  else if (choice !== undefined) reassignSpeaker(id, Number(choice))
+}
+
 /** 点说话人标签 → 变成输入框，改名后所有同编号的行一起更新。 */
 function editSpeakerName(node, id) {
   const input = document.createElement('input')
@@ -647,7 +675,10 @@ function transcribe(samples) {
       }
       const text = (result.text ?? '').trim()
       clearPartial()
-      if (text) appendLine(text, result.audioSeconds, result.speaker)
+      if (text) {
+        appendLine(text, result.audioSeconds, result.speaker)
+        if (result.speaker?.merges !== undefined) applyMerges(result.speaker.merges)
+      }
     })
     .catch((error) => {
       const text = String(error?.message ?? error)
@@ -790,6 +821,12 @@ function pushLine(text, ts, speaker, existingId) {
       event.stopPropagation()
       editSpeakerName(chip, speakerId)
     })
+    chip.addEventListener('contextmenu', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      void speakerMenu(chip, speakerId)
+    })
+    chip.title += '（右键改判/改名）'
     body.append(chip)
   }
   body.append(document.createTextNode(line.text))

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('localVoice', {
   transcribe: (wav, language, partial, speakers) =>
     ipcRenderer.invoke('engine:transcribe', { wav, language, partial, speakers }),
   resetSpeakers: () => ipcRenderer.invoke('speaker:reset'),
+  speakerMenu: (payload) => ipcRenderer.invoke('speaker:menu', payload),
   stop: () => ipcRenderer.invoke('engine:stop'),
   download: (modelId) => ipcRenderer.invoke('model:download', modelId),
   installEnv: () => ipcRenderer.invoke('env:install'),

@@ -118,6 +118,47 @@ function fbank(audio) {
 }
 
 
+/**
+ * 裁掉首尾静音。声纹模型对整段取平均，前后静音会拉低同一人的相似度。
+ * @param {Float32Array} audio
+ * @param {number} frame 一个能量帧的采样数（默认 160 = 10ms）
+ * @returns {{audio: Float32Array, voicedSeconds: number}}
+ */
+function trimSilence(audio, frame = 160) {
+  const frames = Math.floor(audio.length / frame)
+  if (frames === 0) return { audio, voicedSeconds: 0 }
+
+  const energy = new Float32Array(frames)
+  for (let f = 0; f < frames; f += 1) {
+    let sum = 0
+    for (let i = 0; i < frame; i += 1) {
+      const v = audio[f * frame + i]
+      sum += v * v
+    }
+    energy[f] = Math.sqrt(sum / frame)
+  }
+
+  // 用中位数估底噪，超过 2 倍底噪且高于绝对阈值才算有声
+  const sorted = Array.from(energy).sort((a, b) => a - b)
+  const floor = sorted[Math.floor(sorted.length * 0.2)] ?? 0
+  const threshold = Math.max(floor * 2, 0.004)
+
+  let first = 0
+  while (first < frames && energy[first] < threshold) first += 1
+  let last = frames - 1
+  while (last > first && energy[last] < threshold) last -= 1
+  if (first >= last) return { audio: audio.slice(0, 0), voicedSeconds: 0 }
+
+  let voiced = 0
+  for (let f = first; f <= last; f += 1) if (energy[f] >= threshold) voiced += 1
+
+  // 前后各留 50ms，避免把字头字尾削掉
+  const pad = 5
+  const start = Math.max(0, first - pad) * frame
+  const end = Math.min(audio.length, (last + 1 + pad) * frame)
+  return { audio: audio.slice(start, end), voicedSeconds: voiced * (frame / SAMPLE_RATE) }
+}
+
 /** 从 16k 单声道 PCM16 WAV 取出 Float32 采样。 */
 function decodeWav(buf) {
   const rate = buf.readUInt32LE(24)
@@ -177,6 +218,7 @@ class SpeakerTracker {
    * @returns {{id: number, similarity: number, created: boolean}}
    */
   assign(embedding) {
+    this.merges = []
     let best = undefined
     let bestScore = -1
     for (const speaker of this.speakers) {
@@ -230,6 +272,7 @@ class SpeakerTracker {
         a.count = total
         this.speakers.splice(j, 1)
         this.lastMerged = { from: b.id, into: a.id }
+        if (this.merges !== undefined) this.merges.push({ from: b.id, into: a.id })
         j -= 1
       }
     }
@@ -246,4 +289,4 @@ class SpeakerTracker {
   }
 }
 
-module.exports = { fbank, decodeWav, SpeakerTracker, NUM_BINS }
+module.exports = { fbank, trimSilence, decodeWav, SpeakerTracker, NUM_BINS }
