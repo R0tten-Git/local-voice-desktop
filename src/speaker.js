@@ -180,8 +180,12 @@ class SpeakerTracker {
    * @param {{threshold?: number, mergeThreshold?: number, maxSpeakers?: number}} options
    */
   constructor(options = {}) {
-    this.threshold = options.threshold ?? 0.64
-    this.mergeThreshold = options.mergeThreshold ?? 0.78
+    this.threshold = options.threshold ?? 0.62
+    /** 只有这么高的相似度才允许改动质心，防止插话把质心拉偏 */
+    this.updateMargin = options.updateMargin ?? 0.75
+    this.mergeThreshold = options.mergeThreshold ?? 0.86
+    /** 每个说话人保留的样本向量数：匹配时取最大值，比只比平均质心稳 */
+    this.exemplars = options.exemplars ?? 12
     this.maxSpeakers = options.maxSpeakers ?? 8
     /**
      * 单个窗口的声纹不够稳，一次不匹配不能立刻建新说话人：
@@ -239,12 +243,17 @@ class SpeakerTracker {
     }
 
     if (best !== undefined && bestScore >= this.threshold) {
-      // 滑动平均更新质心，让判定随说话内容逐渐稳定
-      const count = best.count + 1
-      for (let i = 0; i < best.centroid.length; i += 1) {
-        best.centroid[i] = (best.centroid[i] * best.count + embedding[i]) / count
+      best.count += 1
+      // 样本记忆：保留最近若干个，跨插话时靠它认出同一个人
+      best.exemplars = best.exemplars ?? []
+      best.exemplars.push(Float32Array.from(embedding))
+      if (best.exemplars.length > this.exemplars) best.exemplars.shift()
+      // 只有足够像才挪质心，勉强及格的不动，避免被插话带偏
+      if (bestScore >= this.updateMargin) {
+        for (let i = 0; i < best.centroid.length; i += 1) {
+          best.centroid[i] = (best.centroid[i] * (best.count - 1) + embedding[i]) / best.count
+        }
       }
-      best.count = count
       return { id: best.id, similarity: bestScore, created: false }
     }
 
@@ -280,7 +289,12 @@ class SpeakerTracker {
       if (count >= this.promoteCount) {
         // 证据够了：转正，并把之前挂在临时编号上的行一起改过来
         this.pending = this.pending.filter((item) => item !== pendingBest)
-        const speaker = { id: this.nextId, centroid: pendingBest.centroid, count }
+        const speaker = {
+          id: this.nextId,
+          centroid: pendingBest.centroid,
+          exemplars: [Float32Array.from(pendingBest.centroid)],
+          count,
+        }
         this.nextId += 1
         this.speakers.push(speaker)
         this.merges.push({ from: pendingBest.id, into: speaker.id })
