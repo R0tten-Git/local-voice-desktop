@@ -87,7 +87,12 @@ ipcMain.handle('speaker:menu', async (event, { current, ids }) => {
           click: () => done(String(id)),
         })),
     ]
-    Menu.buildFromTemplate(items).popup({ window: BrowserWindow.fromWebContents(event.sender), callback: () => done(undefined) })
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner || owner.isDestroyed()) {
+      done(undefined)
+      return
+    }
+    Menu.buildFromTemplate(items).popup({ window: owner, callback: () => done(undefined) })
   })
 })
 
@@ -154,13 +159,14 @@ function createFloatWindow() {
 
 function showFloat() {
   const win = createFloatWindow()
-  if (!win) return
+  if (!win || win.isDestroyed()) return
   win.webContents.send('status:sync', status)
   win.showInactive()
 }
 
 function hideFloat() {
-  floatWindow?.hide()
+  if (!floatWindow || floatWindow.isDestroyed()) return
+  floatWindow.hide()
 }
 
 ipcMain.on('float:show-main', () => showWindow())
@@ -190,7 +196,10 @@ function statusText() {
 }
 
 function refreshTray() {
-  if (!tray) return
+  // 应用退出/托盘销毁后，状态更新仍可能触发；对已销毁对象调用会抛
+  // "Object has been destroyed"，之前就是这里让主进程崩掉
+  if (!tray || tray.isDestroyed?.()) return
+  try {
   // macOS 直接把文字放在菜单栏；Windows 没有 setTitle，只能靠 tooltip 和菜单
   if (process.platform === 'darwin') tray.setTitle(statusText())
   const label =
@@ -215,6 +224,9 @@ function refreshTray() {
       { label: '退出 LocalVoice', click: () => app.quit() },
     ]),
   )
+  } catch (error) {
+    logLine(`托盘更新失败：${error.message}`)
+  }
 }
 
 function createTray() {
