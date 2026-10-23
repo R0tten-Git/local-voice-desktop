@@ -10,7 +10,22 @@ const { Engine } = require('./engine')
 const { probe, MODELS } = require('../scripts/probe')
 const { downloadModel } = require('./downloader')
 const bootstrap = require('./bootstrap')
-const { fbank, trimSilence, decodeWav, SpeakerTracker, NUM_BINS } = require('./speaker')
+const {
+  fbank,
+  trimSilence,
+  decodeWav,
+  SpeakerTracker,
+  clusterEmbeddings,
+  NUM_BINS,
+} = require('./speaker')
+
+/**
+ * 每句话的窗口向量都留着，供"重新整理说话人"做一次全局聚类。
+ * 限制总量，避免长时间录音把内存吃满。
+ */
+const sessionWindows = new Map()
+const MAX_TOKENS = 2000
+let tokenSeq = 0
 
 /**
  * 声纹引擎：模型和运行时都随安装包分发，第一次用到时才初始化。
@@ -59,6 +74,7 @@ async function identifySpeaker(wav) {
   const HOP_S = 0.75
   const labels = []
   const scores = []
+  const windowEmbeddings = []
   /** 一个 chunk 内可能发生多次待定转正/合并，必须全部收集起来，
       否则界面只知道最后一次，前面的"说话人 ?"永远改不回来 */
   const allMerges = []
@@ -75,6 +91,7 @@ async function identifySpeaker(wav) {
     if (Array.isArray(speakerTracker.merges)) allMerges.push(...speakerTracker.merges)
     labels.push(result.id)
     scores.push(result.similarity)
+    windowEmbeddings.push(embedding)
   }
 
   if (labels.length === 0) return { skipped: true, voicedSeconds: Number(voicedSeconds.toFixed(2)) }
@@ -91,7 +108,12 @@ async function identifySpeaker(wav) {
       `${mixed ? '（混说）' : ''}${allMerges.length > 0 ? ` 合并${JSON.stringify(allMerges)}` : ''}`,
   )
 
+  const token = String(++tokenSeq)
+  if (sessionWindows.size >= MAX_TOKENS) sessionWindows.delete(sessionWindows.keys().next().value)
+  sessionWindows.set(token, windowEmbeddings)
+
   return {
+    token,
     id: dominant,
     similarity: Number((scores[labels.indexOf(dominant)] ?? 0).toFixed(3)),
     voicedSeconds: Number(voicedSeconds.toFixed(2)),
@@ -101,6 +123,41 @@ async function identifySpeaker(wav) {
   }
 }
 
+/**
+ * 把整场录音的所有窗口放在一起重新聚类。
+ * 不依赖绝对阈值，比逐句在线判定稳得多。
+ */
+ipcMain.handle('speaker:recluster', async (_event, { k }) => {
+  const tokens = [...sessionWindows.keys()]
+  const flat = []
+  const owner = []
+  for (const token of tokens) {
+    for (const embedding of sessionWindows.get(token) ?? []) {
+      flat.push(embedding)
+      owner.push(token)
+    }
+  }
+  if (flat.length === 0) return { mapping: {}, k: 0, windows: 0 }
+
+  const forced = Number(k) > 0 ? Number(k) : undefined
+  const { labels, k: got } = clusterEmbeddings(flat, forced === undefined ? {} : { k: forced })
+
+  const votes = new Map()
+  labels.forEach((label, index) => {
+    const token = owner[index]
+    if (!votes.has(token)) votes.set(token, new Map())
+    const tally = votes.get(token)
+    tally.set(label, (tally.get(label) ?? 0) + 1)
+  })
+
+  const mapping = {}
+  for (const [token, tally] of votes) {
+    mapping[token] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  }
+  logLine(`重新聚类：${flat.length} 个窗口 → ${got} 个说话人`)
+  return { mapping, k: got, windows: flat.length }
+})
+
 /** 右键说话人标签时弹出的菜单：改判 / 改名 / 拆分。 */
 ipcMain.handle('speaker:menu', async (event, { current, ids }) => {
   return await new Promise((resolve) => {
@@ -109,6 +166,24 @@ ipcMain.handle('speaker:menu', async (event, { current, ids }) => {
       if (settled) return
       settled = true
       resolve(value)
+    }
+    // current = -999 表示这是"说话人按钮"的菜单，不是某行的菜单
+    const isButton = current === -999
+    if (isButton) {
+      const owner0 = BrowserWindow.fromWebContents(event.sender)
+      if (!owner0 || owner0.isDestroyed()) {
+        done(undefined)
+        return
+      }
+      Menu.buildFromTemplate([
+        { label: '重新整理说话人（自动判断人数）', click: () => done('reorganize') },
+        { label: '按 2 人整理', click: () => done('k:2') },
+        { label: '按 3 人整理', click: () => done('k:3') },
+        { label: '按 4 人整理', click: () => done('k:4') },
+        { type: 'separator' },
+        { label: '清除说话人记录', click: () => done('clear') },
+      ]).popup({ window: owner0, callback: () => done(undefined) })
+      return
     }
     const items = [
       { label: '重命名…', click: () => done('rename') },
@@ -131,6 +206,7 @@ ipcMain.handle('speaker:menu', async (event, { current, ids }) => {
 
 ipcMain.handle('speaker:reset', async () => {
   speakerTracker.reset()
+  sessionWindows.clear()
   return speakerTracker.count
 })
 

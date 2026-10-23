@@ -231,9 +231,12 @@ function initSpeakers() {
       : '已关闭（点击开启）'
   }
   paint()
-  el.speakers.addEventListener('contextmenu', (event) => {
+  el.speakers.addEventListener('contextmenu', async (event) => {
     event.preventDefault()
-    clearSpeakerRecords()
+    const choice = await api.speakerMenu({ current: -999, ids: [] })
+    if (choice === 'reorganize') void reorganizeSpeakers()
+    else if (String(choice).startsWith('k:')) void reorganizeSpeakers(Number(String(choice).slice(2)))
+    else if (choice === 'clear') clearSpeakerRecords()
   })
   el.speakers.addEventListener('click', () => {
     state.speakers = !state.speakers
@@ -285,6 +288,29 @@ function reassignSpeaker(from, to) {
   rebuildTranscript()
   render()
   if (touched > 0) state.notice = `已把 ${speakerLabel(from)} 的 ${touched} 句改判为 ${speakerLabel(to)}`
+  render()
+}
+
+/**
+ * 重新整理说话人：整场录音的窗口一起聚类。
+ * 这是比逐句判定可靠得多的方式，尤其在两个人对话时。
+ */
+async function reorganizeSpeakers(k) {
+  const { mapping, k: got, windows } = await api.reclusterSpeakers(k)
+  if (windows === 0) {
+    state.notice = '还没有可整理的说话人数据'
+    render()
+    return
+  }
+  let touched = 0
+  for (const line of state.lines) {
+    const token = line.speaker?.token
+    if (token === undefined || mapping[token] === undefined) continue
+    line.speaker = { ...line.speaker, id: mapping[token], mixed: false }
+    touched += 1
+  }
+  rebuildTranscript()
+  state.notice = `已整理 ${touched} 句（${windows} 个窗口 → ${got} 个说话人）`
   render()
 }
 
