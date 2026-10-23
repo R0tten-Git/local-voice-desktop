@@ -101,7 +101,15 @@ async function identifySpeaker(wav) {
   for (const id of labels) tally.set(id, (tally.get(id) ?? 0) + 1)
   const [dominant, hits] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]
   const share = hits / labels.length
-  const mixed = share < 0.7 && tally.size > 1
+  // 判"混说"要谨慎：短句只有 2 个窗口，一个不同就会误报，
+  // 所以要求窗口够多、第二个人确实占了不小比例，且不止一个窗口指向他
+  const second = [...tally.entries()].filter(([id]) => id !== dominant).sort((a, b) => b[1] - a[1])[0]
+  const mixed =
+    labels.length >= 4 &&
+    share < 0.7 &&
+    second !== undefined &&
+    second[1] >= 2 &&
+    second[1] / labels.length >= 0.35
 
   logLine(
     `声纹 ${voicedSeconds.toFixed(1)}s → 窗口 [${labels.join(',')}] → 说话人 ${dominant}` +

@@ -176,54 +176,51 @@ function clusterEmbeddings(embeddings, options = {}) {
   if (n === 0) return { labels: [], k: 0 }
   if (n === 1) return { labels: [1], k: 1 }
 
-  // 初始每个向量一类
+  const maxK = options.maxK ?? 8
+  /**
+   * 合并下限：两个类的相似度还这么高，就说明是同一个人。
+   * 实测同一人的窗口两两相似度多在 0.65–0.9，不同人 0.2–0.5，
+   * 0.55 落在中间的空档里。
+   */
+  const floorSimilarity = options.floorSimilarity ?? 0.55
+
   let clusters = embeddings.map((embedding, index) => ({
     members: [index],
     centroid: Float32Array.from(embedding),
   }))
 
-  const similarity = (a, b) => SpeakerTracker.cosine(a.centroid, b.centroid)
-  const merge = (a, b) => {
+  const target = options.k === undefined ? undefined : Math.max(1, Math.min(Number(options.k), n))
+
+  while (clusters.length > 1) {
+    if (target !== undefined && clusters.length <= target) break
+    let bi = 0
+    let bj = 1
+    let bs = -1
+    for (let i = 0; i < clusters.length; i += 1) {
+      for (let j = i + 1; j < clusters.length; j += 1) {
+        const score = SpeakerTracker.cosine(clusters[i].centroid, clusters[j].centroid)
+        if (score > bs) {
+          bs = score
+          bi = i
+          bj = j
+        }
+      }
+    }
+    // 自动模式：已经不像同一个人了就停；指定人数时按人数来
+    if (target === undefined && bs < floorSimilarity) break
+    if (target !== undefined && target === 1) break
+    const a = clusters[bi]
+    const b = clusters[bj]
     const total = a.members.length + b.members.length
     const centroid = new Float32Array(a.centroid.length)
     for (let i = 0; i < centroid.length; i += 1) {
       centroid[i] = (a.centroid[i] * a.members.length + b.centroid[i] * b.members.length) / total
     }
-    return { members: [...a.members, ...b.members], centroid }
-  }
-
-  const targetK = options.k
-  const minSimilarity = options.minSimilarity ?? 0.55
-  const maxK = options.maxK ?? 8
-
-  while (clusters.length > 1) {
-    let bestI = 0
-    let bestJ = 1
-    let bestScore = -1
-    for (let i = 0; i < clusters.length; i += 1) {
-      for (let j = i + 1; j < clusters.length; j += 1) {
-        const score = similarity(clusters[i], clusters[j])
-        if (score > bestScore) {
-          bestScore = score
-          bestI = i
-          bestJ = j
-        }
-      }
-    }
-    // 指定人数：合并到 k 为止
-    if (targetK !== undefined) {
-      if (clusters.length <= targetK) break
-    } else {
-      // 自动：看"再合并有多勉强"，超过上限或相似度太低就停
-      const limit = clusters.length > maxK ? -Infinity : minSimilarity
-      if (bestScore < limit) break
-    }
-    clusters[bestI] = merge(clusters[bestI], clusters[bestJ])
-    clusters.splice(bestJ, 1)
+    clusters[bi] = { members: [...a.members, ...b.members], centroid }
+    clusters.splice(bj, 1)
   }
 
   const labels = new Array(n).fill(0)
-  // 按类内样本数从多到少编号，让"说话人 1"通常是说得最多的人
   clusters.sort((a, b) => b.members.length - a.members.length)
   clusters.forEach((cluster, index) => {
     for (const member of cluster.members) labels[member] = index + 1

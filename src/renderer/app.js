@@ -927,6 +927,8 @@ async function start() {
     state.speakerNames = {}
     localStorage.removeItem('localvoice.speakerNames')
     state.sessionActive = true
+    state.autoOrganized = false
+    state.autoOrganizeAttempts = 0
   }
   el.state.textContent = '引擎加载中…'
   render()
@@ -973,6 +975,11 @@ function pause() {
   state.timer = undefined
   state.phase = state.lines.length > 0 ? 'paused' : 'idle'
   render()
+  // 停下来之后自动按全局聚类整理一次，比逐句判定的结果干净得多
+  if (state.speakers && state.lines.length >= 4 && !state.autoOrganized) {
+    state.autoOrganized = true
+    void reorganizeSpeakers()
+  }
 }
 
 function toggle() {
