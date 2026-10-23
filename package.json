@@ -21,7 +21,9 @@
     "build:mac": "electron-builder --mac --arm64 --publish never",
     "build:win": "electron-builder --win --x64 --publish never",
     "prebuild:mac": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs && node scripts/prune-onnx.mjs darwin",
-    "prebuild:win": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs && node scripts/prune-onnx.mjs win32"
+    "prebuild:win": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs && node scripts/prune-onnx.mjs win32",
+    "postbuild:mac": "node -e \"require('node:fs').writeFileSync('dist/.metadata_never_index','')\"",
+    "postbuild:win": "node -e \"require('node:fs').writeFileSync('dist/.metadata_never_index','')\""
   },
   "devDependencies": {
     "electron": "^33.2.0",
