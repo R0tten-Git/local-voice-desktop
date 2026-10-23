@@ -51,10 +51,12 @@ jobs:
           console.log('all main modules load');
           "
 
-      - name: Bundle uv and llama.cpp
+      - name: Bundle uv, llama.cpp and the speaker model
         run: |
           node scripts/fetch-uv.mjs
           node scripts/fetch-llama.mjs
+          node scripts/fetch-onnx.mjs
+          node scripts/prune-onnx.mjs ${{ runner.os == 'macOS' && 'darwin' || 'win32' }}
 
       - name: Package
         run: npm run ${{ matrix.script }}

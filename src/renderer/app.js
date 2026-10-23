@@ -54,6 +54,7 @@ const el = {
   gpuFill: document.getElementById('gpuFill'),
   gpuInstall: document.getElementById('gpuInstall'),
   pace: document.getElementById('pace'),
+  speakers: document.getElementById('speakers'),
   envSize: document.getElementById('envSize'),
   envPath: document.getElementById('envPath'),
   bar: document.getElementById('bar'),
@@ -92,6 +93,10 @@ const state = {
   audioInfo: '',
   /** 临时结果的间隔，按最近的推理耗时动态调整 */
   partialEveryMs: 1200,
+  /** 是否区分说话人 */
+  speakers: true,
+  /** 说话人编号 → 自定义名字 */
+  speakerNames: {},
   /** 当前选中的模型 id —— 不依赖 DOM，避免 select 状态异常时取到空值 */
   modelId: '',
   /** 最近几次推理耗时，用来算平均值 */
@@ -196,6 +201,79 @@ const EMPTY_STATE = `
 
 function showEmptyState() {
   el.transcript.innerHTML = EMPTY_STATE
+}
+
+// ---------------------------------------------------------------- 说话人
+
+const SPEAKER_COLORS = ['#5b8dff', '#f0a44a', '#4ec98a', '#c47bff', '#ff6b8a', '#3fc7d6']
+
+function speakerLabel(id) {
+  return state.speakerNames[id] ?? `说话人 ${id}`
+}
+
+function initSpeakers() {
+  const saved = localStorage.getItem('localvoice.speakers')
+  state.speakers = saved !== 'off'
+  try {
+    state.speakerNames = JSON.parse(localStorage.getItem('localvoice.speakerNames') ?? '{}')
+  } catch {
+    state.speakerNames = {}
+  }
+  const paint = () => {
+    el.speakers.dataset.pace = state.speakers ? 'fast' : ''
+    el.speakers.textContent = state.speakers ? '说话人' : '单人'
+    el.speakers.dataset.tip = state.speakers
+      ? '已开启区分说话人（点击关闭）'
+      : '已关闭（点击开启）'
+  }
+  paint()
+  el.speakers.addEventListener('click', () => {
+    state.speakers = !state.speakers
+    localStorage.setItem('localvoice.speakers', state.speakers ? 'on' : 'off')
+    paint()
+    if (!state.speakers) {
+      void api.resetSpeakers()
+      for (const line of state.lines) delete line.speaker
+      rebuildTranscript()
+      render()
+    }
+  })
+}
+
+/** 重新渲染整个转写区（改名后需要重画）。 */
+function rebuildTranscript() {
+  el.transcript.innerHTML = ''
+  if (state.lines.length === 0) {
+    showEmptyState()
+    return
+  }
+  for (const line of state.lines) pushLine(line.text, line.ts, line.speaker, line.id)
+}
+
+/** 点说话人标签 → 变成输入框，改名后所有同编号的行一起更新。 */
+function editSpeakerName(node, id) {
+  const input = document.createElement('input')
+  input.value = state.speakerNames[id] ?? `说话人 ${id}`
+  input.maxLength = 12
+  node.replaceWith(input)
+  input.focus()
+  input.select()
+  const commit = () => {
+    const name = input.value.trim()
+    if (name !== '') {
+      state.speakerNames[id] = name
+      localStorage.setItem('localvoice.speakerNames', JSON.stringify(state.speakerNames))
+    }
+    rebuildTranscript()
+  }
+  input.addEventListener('blur', commit)
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') input.blur()
+    if (event.key === 'Escape') {
+      input.value = state.speakerNames[id] ?? `说话人 ${id}`
+      input.blur()
+    }
+  })
 }
 
 // ------------------------------------------------------------------ 切句节奏
@@ -543,7 +621,7 @@ function transcribe(samples) {
   state.queue = state.queue
     .then(async () => {
       const wav = encodeWav(samples, LIVE.sampleRate)
-      const result = await api.transcribe(toBase64(wav), 'auto')
+      const result = await api.transcribe(toBase64(wav), 'auto', false, state.speakers)
       // 按最近几次推理的平均耗时调整临时稿频率。
       // 注意必须双向：之前写成了单向降频，一次预热就能把间隔永久锁在 5 秒。
       const costMs = Math.round((result.inferenceSeconds ?? 0) * 1000)
@@ -569,7 +647,7 @@ function transcribe(samples) {
       }
       const text = (result.text ?? '').trim()
       clearPartial()
-      if (text) appendLine(text, result.audioSeconds)
+      if (text) appendLine(text, result.audioSeconds, result.speaker)
     })
     .catch((error) => {
       const text = String(error?.message ?? error)
@@ -642,7 +720,7 @@ function splitSentences(text) {
  * 上屏。audioSeconds 是这段音频的长度，用来把时间戳按字数分摊到每句上，
  * 否则一段拆出来的几行会显示同一个时间，看起来像批量输出。
  */
-function appendLine(text, audioSeconds) {
+function appendLine(text, audioSeconds, speaker) {
   text = trimLeadingFiller(text)
   const sentences = splitSentences(text)
   if (sentences.length === 0) return
@@ -669,23 +747,53 @@ function appendLine(text, audioSeconds) {
   for (const sentence of sentences) {
     consumed += sentence.length / totalChars
     const at = new Date(startAt + spanMs * consumed)
-    pushLine(sentence, clock(at))
+    pushLine(sentence, clock(at), speaker)
   }
   render()
 }
 
 /** 真正往界面里加一行。 */
-function pushLine(text, ts) {
-  state.lines.push({ id: `${Date.now()}-${Math.random()}`, ts: ts ?? clock(new Date()), text })
-  const previous = el.transcript.querySelector('.placeholder')
-  if (previous) previous.remove()
+function pushLine(text, ts, speaker, existingId) {
+  let line
+  if (existingId === undefined) {
+    line = { id: `${Date.now()}-${Math.random()}`, ts: ts ?? clock(new Date()), text, speaker }
+    state.lines.push(line)
+  } else {
+    // 重画已有行（改名后需要），沿用原来的 id / 时间 / 说话人
+    line = state.lines.find((item) => item.id === existingId)
+    if (line === undefined) return
+    line.text = text
+  }
+
+  const placeholder = el.transcript.querySelector('.placeholder')
+  if (placeholder) placeholder.remove()
+
   const node = document.createElement('div')
   node.className = 'line'
-  node.dataset.id = state.lines[state.lines.length - 1].id
+  node.dataset.id = line.id
+
   const time = document.createElement('time')
-  time.textContent = state.lines[state.lines.length - 1].ts
+  time.textContent = line.ts
+
   const body = document.createElement('span')
-  body.textContent = text
+  const speakerId = line.speaker?.id
+  if (speakerId !== undefined) {
+    const chip = document.createElement('span')
+    chip.className = 'speaker'
+    const dot = document.createElement('i')
+    dot.style.background = SPEAKER_COLORS[(speakerId - 1) % SPEAKER_COLORS.length]
+    chip.append(dot, document.createTextNode(speakerLabel(speakerId)))
+    const similarity =
+      line.speaker.similarity === undefined ? '' : ` · 相似度 ${line.speaker.similarity}`
+    chip.title = `${speakerLabel(speakerId)}${similarity}（点击改名）`
+    chip.addEventListener('click', (event) => {
+      event.stopPropagation()
+      editSpeakerName(chip, speakerId)
+    })
+    body.append(chip)
+  }
+  body.append(document.createTextNode(line.text))
+
   node.append(time, body)
   el.transcript.append(node)
   el.transcript.scrollTop = el.transcript.scrollHeight
@@ -770,6 +878,7 @@ function clearAll() {
   clearInterval(state.timer)
   state.timer = undefined
   clearPartial()
+  void api.resetSpeakers()
   state.lines = []
   state.accumulated = 0
   state.peak = 0
@@ -995,6 +1104,7 @@ async function startDownload() {
 
 async function init() {
   initPace()
+  initSpeakers()
   initTheme()
   initWave()
   if (el.toggle) {
@@ -1063,7 +1173,12 @@ el.copy.addEventListener('click', () => {
 /** 把当前转写存成 markdown。返回是否真的写盘了（用户可能取消）。 */
 async function saveTranscript() {
   const header = `# 实时转写 ${new Date().toLocaleString('zh-CN')}\n\n- 模型：${el.model.selectedOptions[0]?.textContent ?? ''}\n\n`
-  const body = state.lines.map((line) => `[${line.ts}] ${line.text}`).join('\n')
+  const body = state.lines
+    .map((line) => {
+      const who = line.speaker === undefined ? '' : `${speakerLabel(line.speaker.id)}：`
+      return `[${line.ts}] ${who}${line.text}`
+    })
+    .join('\n')
   const result = await api.saveMarkdown(`${header}${body}\n`, `localvoice-${fileStamp()}.md`)
   if (result.saved) {
     state.notice = `已保存 ${result.filePath}`

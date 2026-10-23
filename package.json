@@ -1,6 +1,6 @@
 {
   "name": "local-voice-desktop",
-  "version": "0.10.13",
+  "version": "0.11.0",
   "private": false,
   "description": "Local, offline real-time speech-to-text for macOS and Windows — Qwen3-ASR, no cloud, no account.",
   "type": "commonjs",
@@ -20,8 +20,8 @@
     "probe": "node scripts/probe.js",
     "build:mac": "electron-builder --mac --arm64 --publish never",
     "build:win": "electron-builder --win --x64 --publish never",
-    "prebuild:mac": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs",
-    "prebuild:win": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs"
+    "prebuild:mac": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs && node scripts/prune-onnx.mjs darwin",
+    "prebuild:win": "node scripts/fetch-uv.mjs && node scripts/fetch-llama.mjs && node scripts/prune-onnx.mjs win32"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -49,6 +49,10 @@
       {
         "from": "vendor/llama",
         "to": "llama"
+      },
+      {
+        "from": "vendor/onnx",
+        "to": "onnx"
       }
     ],
     "mac": {
@@ -72,5 +76,8 @@
   "allowScripts": {
     "electron@33.4.11": true
   },
-  "author": "R0tten-Git"
+  "author": "R0tten-Git",
+  "dependencies": {
+    "onnxruntime-node": "^1.30.0"
+  }
 }

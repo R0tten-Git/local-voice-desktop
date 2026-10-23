@@ -161,6 +161,36 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   padding-top: 4px;
   text-align: right;
 }
+
+/* 说话人标签：小圆点 + 名字，点一下可以改名 */
+.speaker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 7px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 1.7;
+  vertical-align: 1px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg-2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.speaker:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); }
+.speaker i { display: block; width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.speaker input {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  width: 62px;
+  outline: none;
+  padding: 0;
+}
+
 .line span {
   font-size: 15px;
   line-height: 1.72;

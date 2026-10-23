@@ -6,8 +6,9 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('localVoice', {
   probe: () => ipcRenderer.invoke('system:probe'),
   start: (modelId) => ipcRenderer.invoke('engine:start', modelId),
-  transcribe: (wav, language, partial) =>
-    ipcRenderer.invoke('engine:transcribe', { wav, language, partial }),
+  transcribe: (wav, language, partial, speakers) =>
+    ipcRenderer.invoke('engine:transcribe', { wav, language, partial, speakers }),
+  resetSpeakers: () => ipcRenderer.invoke('speaker:reset'),
   stop: () => ipcRenderer.invoke('engine:stop'),
   download: (modelId) => ipcRenderer.invoke('model:download', modelId),
   installEnv: () => ipcRenderer.invoke('env:install'),

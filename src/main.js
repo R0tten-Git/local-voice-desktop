@@ -10,6 +10,52 @@ const { Engine } = require('./engine')
 const { probe, MODELS } = require('../scripts/probe')
 const { downloadModel } = require('./downloader')
 const bootstrap = require('./bootstrap')
+const { fbank, decodeWav, SpeakerTracker, NUM_BINS } = require('./speaker')
+
+/**
+ * 声纹引擎：模型和运行时都随安装包分发，第一次用到时才初始化。
+ * 28MB 的模型跑一次约 20–40ms，CPU 足够。
+ */
+let speakerReady
+const speakerTracker = new SpeakerTracker()
+
+async function getSpeakerSession() {
+  if (speakerReady === undefined) {
+    speakerReady = (async () => {
+      const ort = require('onnxruntime-node')
+      const modelPath = [
+        path.join(process.resourcesPath ?? '', 'onnx', 'campplus.onnx'),
+        path.join(__dirname, '..', 'vendor', 'onnx', 'campplus.onnx'),
+      ].find((p) => fs.existsSync(p))
+      if (!modelPath) throw new Error('缺少声纹模型 campplus.onnx')
+      return await ort.InferenceSession.create(modelPath)
+    })().catch((error) => {
+      speakerReady = undefined
+      throw error
+    })
+  }
+  return await speakerReady
+}
+
+/** 为一段 WAV 计算说话人编号；太短的片段不可靠，直接跳过。 */
+async function identifySpeaker(wav) {
+  const audio = decodeWav(wav)
+  if (audio.length / 16000 < 0.6) return undefined
+  const session = await getSpeakerSession()
+  const ort = require('onnxruntime-node')
+  const { data, frames } = fbank(audio)
+  const output = await session.run({
+    x: new ort.Tensor('float32', data, [1, frames, NUM_BINS]),
+  })
+  const embedding = SpeakerTracker.normalize(Float32Array.from(output.embedding.data))
+  const result = speakerTracker.assign(embedding)
+  return { id: result.id, similarity: Number(result.similarity.toFixed(3)) }
+}
+
+ipcMain.handle('speaker:reset', async () => {
+  speakerTracker.reset()
+  return speakerTracker.count
+})
 
 /** @type {BrowserWindow | undefined} */
 let window
@@ -275,16 +321,26 @@ app.whenReady().then(() => {
                 ]
                 const host = document.querySelector('.transcript')
                 host.innerHTML = ''
-                for (const [ts, text] of rows) {
+                const speakers = [[1, '说话人 1', '#5b8dff'], [2, '说话人 2', '#f0a44a']]
+                rows.forEach(([ts, text], index) => {
                   const line = document.createElement('div')
                   line.className = 'line'
                   const time = document.createElement('time')
                   time.textContent = ts
                   const span = document.createElement('span')
-                  span.textContent = text
+                  if (index !== 1 && index !== 2) {
+                    const [id, name, color] = speakers[index < 2 ? 0 : 1]
+                    const chip = document.createElement('span')
+                    chip.className = 'speaker'
+                    const dot = document.createElement('i')
+                    dot.style.background = color
+                    chip.append(dot, document.createTextNode(name))
+                    span.append(chip)
+                  }
+                  span.append(document.createTextNode(text))
                   line.append(time, span)
                   host.append(line)
-                }
+                })
                 const partial = document.createElement('div')
                 partial.className = 'line partial'
                 const t2 = document.createElement('time')
@@ -407,14 +463,23 @@ ipcMain.handle('engine:start', async (_event, modelId) => {
   return { modelId, modelPath: dir, loadMs: Date.now() - started }
 })
 
-ipcMain.handle('engine:transcribe', async (_event, { wav, language, partial }) => {
+ipcMain.handle('engine:transcribe', async (_event, { wav, language, partial, speakers }) => {
   if (typeof wav !== 'string' || wav.length === 0) throw new Error('音频为空')
   // 临时稿允许更早放弃：它只是预览，卡住不能拖累定稿
-  return await engine.transcribe(
+  const result = await engine.transcribe(
     Buffer.from(wav, 'base64'),
     language ?? 'auto',
     partial === true ? 8_000 : 30_000,
   )
+  // 只有定稿且开了开关时才做声纹（临时稿会污染聚类）
+  if (partial !== true && speakers === true && result.text !== '') {
+    try {
+      result.speaker = await identifySpeaker(Buffer.from(wav, 'base64'))
+    } catch (error) {
+      logLine(`声纹识别失败：${error.message}`)
+    }
+  }
+  return result
 })
 
 ipcMain.handle('engine:stop', async () => {
