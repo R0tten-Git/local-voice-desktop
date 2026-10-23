@@ -180,12 +180,21 @@ class SpeakerTracker {
    * @param {{threshold?: number, mergeThreshold?: number, maxSpeakers?: number}} options
    */
   constructor(options = {}) {
-    this.threshold = options.threshold ?? 0.68
-    this.mergeThreshold = options.mergeThreshold ?? 0.8
+    this.threshold = options.threshold ?? 0.64
+    this.mergeThreshold = options.mergeThreshold ?? 0.78
     this.maxSpeakers = options.maxSpeakers ?? 8
+    /**
+     * 单个窗口的声纹不够稳，一次不匹配不能立刻建新说话人：
+     * 先放进"待定"，等第二个窗口也指向它才转正，否则同一个人会被拆成好几个。
+     */
+    this.promoteCount = options.promoteCount ?? 2
+    this.pendingThreshold = options.pendingThreshold ?? 0.58
     /** @type {Array<{id: number, centroid: Float32Array, count: number}>} */
     this.speakers = []
+    /** @type {Array<{id: number, centroid: Float32Array, count: number}>} */
+    this.pending = []
     this.nextId = 1
+    this.nextPendingId = -1
   }
 
   static cosine(a, b) {
@@ -251,11 +260,41 @@ class SpeakerTracker {
       }
     }
 
-    const speaker = { id: this.nextId, centroid: Float32Array.from(embedding), count: 1 }
-    this.nextId += 1
-    this.speakers.push(speaker)
-    this.mergeSimilar()
-    return { id: speaker.id, similarity: bestScore, created: true }
+    // 先看有没有"待定"的候选，像它就累计证据
+    let pendingBest
+    let pendingScore = -1
+    for (const item of this.pending) {
+      const score = SpeakerTracker.cosine(embedding, item.centroid)
+      if (score > pendingScore) {
+        pendingScore = score
+        pendingBest = item
+      }
+    }
+
+    if (pendingBest !== undefined && pendingScore >= this.pendingThreshold) {
+      const count = pendingBest.count + 1
+      for (let i = 0; i < pendingBest.centroid.length; i += 1) {
+        pendingBest.centroid[i] = (pendingBest.centroid[i] * pendingBest.count + embedding[i]) / count
+      }
+      pendingBest.count = count
+      if (count >= this.promoteCount) {
+        // 证据够了：转正，并把之前挂在临时编号上的行一起改过来
+        this.pending = this.pending.filter((item) => item !== pendingBest)
+        const speaker = { id: this.nextId, centroid: pendingBest.centroid, count }
+        this.nextId += 1
+        this.speakers.push(speaker)
+        this.merges.push({ from: pendingBest.id, into: speaker.id })
+        this.mergeSimilar()
+        return { id: speaker.id, similarity: pendingScore, created: true, promotedFrom: pendingBest.id }
+      }
+      return { id: pendingBest.id, similarity: pendingScore, created: false, pending: true }
+    }
+
+    // 完全没见过的声音：挂到新的临时编号下，不占用正式编号
+    const candidate = { id: this.nextPendingId, centroid: Float32Array.from(embedding), count: 1 }
+    this.nextPendingId -= 1
+    this.pending.push(candidate)
+    return { id: candidate.id, similarity: bestScore, created: false, pending: true }
   }
 
   /** 合并过于相似的两个说话人（把小编号保留，大编号并入）。 */
@@ -280,7 +319,9 @@ class SpeakerTracker {
 
   reset() {
     this.speakers = []
+    this.pending = []
     this.nextId = 1
+    this.nextPendingId = -1
     this.lastMerged = undefined
   }
 

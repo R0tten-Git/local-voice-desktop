@@ -208,6 +208,8 @@ function showEmptyState() {
 const SPEAKER_COLORS = ['#5b8dff', '#f0a44a', '#4ec98a', '#c47bff', '#ff6b8a', '#3fc7d6']
 
 function speakerLabel(id) {
+  // 负数编号 = 还在"待定"的候选，第二个窗口确认后会转正并整组改名
+  if (id < 0) return '说话人 ?'
   return state.speakerNames[id] ?? `说话人 ${id}`
 }
 
@@ -812,7 +814,7 @@ function pushLine(text, ts, speaker, existingId) {
     const chip = document.createElement('span')
     chip.className = 'speaker'
     const dot = document.createElement('i')
-    dot.style.background = SPEAKER_COLORS[(speakerId - 1) % SPEAKER_COLORS.length]
+    dot.style.background = SPEAKER_COLORS[(Math.abs(speakerId) - 1) % SPEAKER_COLORS.length]
     const mixed = line.speaker.mixed === true
     chip.append(
       dot,
@@ -826,6 +828,11 @@ function pushLine(text, ts, speaker, existingId) {
       : `${speakerLabel(speakerId)}${similarity}`
     chip.addEventListener('click', (event) => {
       event.stopPropagation()
+      if (speakerId < 0) {
+        state.notice = '这个说话人还在确认中，等它再说一句就会定下来'
+        render()
+        return
+      }
       editSpeakerName(chip, speakerId)
     })
     chip.addEventListener('contextmenu', (event) => {
